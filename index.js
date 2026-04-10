@@ -96,37 +96,196 @@ app.get("/api/search", async (req, res) => {
     }
 });
 
+app.get("/api/list/:type", async (req, res) => {
+    try {
+        var type = req.params.type; // "diziler" or "filmler"
+        if (type !== "diziler" && type !== "filmler") return respond(res, { items: [], page: 1, totalPages: 1, filters: {} });
+
+        var page = parseInt(req.query.page) || 1;
+        var kategori = req.query.kategori || "";
+        var yil = req.query.yil || "";
+        var durum = req.query.durum || "";
+        var siralama = req.query.siralama || "newest";
+
+        var cacheKey = `api_list_${type}_${page}_${kategori}_${yil}_${durum}_${siralama}`;
+        var cached = myCache.get(cacheKey);
+        if (cached) return respond(res, cached);
+
+        const cheerio = require("cheerio");
+        var baseUrl = process.env.PROXY_URL;
+
+        var params = new URLSearchParams();
+        if (page > 1) params.set("page", page);
+        if (kategori) params.set("kategori", kategori);
+        if (yil) params.set("yil", yil);
+        if (durum) params.set("durum", durum);
+        if (siralama && siralama !== "newest") params.set("siralama", siralama);
+
+        var url = baseUrl + "/" + type + (params.toString() ? "?" + params.toString() : "");
+        var response = await axios({ url, headers: header, method: "GET" });
+
+        if (response && response.status == 200) {
+            var $ = cheerio.load(response.data);
+            var items = [];
+
+            $("li.content-card").each((j, el) => {
+                var $a = $(el).find("a.card-link").first();
+                var link = $a.attr("href") || "";
+                var name = $(el).find(".card-title").text().trim();
+                var poster = $(el).find("img").first().attr("data-src") || $(el).find("img").first().attr("src") || "";
+                var rating = $(el).find(".card-rating").text().replace(/[^\d.]/g, "").trim();
+                var year = $(el).find(".card-year").text().trim();
+                var itemType = link.includes("/dizi/") ? "series" : "movie";
+                var id = link;
+                try { id = new URL(link).pathname; } catch(e) {}
+                if (name && id && id !== "/") items.push({ id, type: itemType, title: name, poster, rating, year });
+            });
+
+            var totalPages = parseInt($("#contentGrid").attr("data-total-pages")) || 1;
+
+            // Extract filter options on first page
+            var filterOptions = {};
+            if (page === 1) {
+                $("select[name]").each((i, sel) => {
+                    var name = $(sel).attr("name");
+                    var options = [];
+                    $(sel).find("option").each((j, opt) => {
+                        options.push({ value: $(opt).attr("value") || "", label: $(opt).text().trim() });
+                    });
+                    filterOptions[name] = options;
+                });
+            }
+
+            var result = { items, page, totalPages, filterOptions };
+            myCache.set(cacheKey, result, 1800);
+            return respond(res, result);
+        }
+        return respond(res, { items: [], page: 1, totalPages: 1, filterOptions: {} });
+    } catch (error) {
+        console.log(error);
+        return respond(res, { items: [], page: 1, totalPages: 1, filterOptions: {} });
+    }
+});
+
 app.get("/api/homepage", async (req, res) => {
     try {
         var cached = myCache.get("api_homepage");
         if (cached) return respond(res, cached);
 
         const cheerio = require("cheerio");
-        var response = await axios({ url: process.env.PROXY_URL, headers: header, method: "GET" });
-        if (response && response.status == 200) {
-            var $ = cheerio.load(response.data);
-            var sections = [];
+        var sections = [];
+        var baseUrl = process.env.PROXY_URL;
 
-            $(".content-section, .swiper-container, .section-container, [class*='section']").each((i, el) => {
-                var title = $(el).find("h2, h3, .section-title, .block-title").first().text().trim();
-                if (!title) return;
-                var items = [];
-                $(el).find(".content-card, article, .poster-item, .movie-item").each((j, card) => {
-                    var link = $(card).find("a").first().attr("href") || "";
-                    var name = $(card).find(".card-title, h3, h4, img").first().attr("alt") || $(card).find(".card-title, h3").first().text().trim();
-                    var poster = $(card).find("img").first().attr("data-src") || $(card).find("img").first().attr("src") || "";
-                    var type = link.includes("/dizi/") ? "series" : "movie";
-                    var id = link;
-                    try { id = new URL(link).pathname; } catch(e) {}
-                    if (name && id) items.push({ id, type, title: name, poster });
-                });
-                if (items.length > 0) sections.push({ title, items });
-            });
-
-            myCache.set("api_homepage", { sections }, 3600);
-            return respond(res, { sections });
+        function titleFromSlug(url) {
+            try {
+                var pathname = new URL(url).pathname;
+                var slug = pathname.split("/").filter(Boolean).pop() || "";
+                return slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+            } catch(e) { return ""; }
         }
-        return respond(res, { sections: [] });
+
+        // Extract trending items (a.trending-item inside .trending-slider)
+        function extractTrendingItems($, slider) {
+            var items = [];
+            $(slider).find("a.trending-item").each((j, el) => {
+                var link = $(el).attr("href") || "";
+                var name = $(el).find(".trending-title").text().trim();
+                if (!name) name = titleFromSlug(link);
+                var poster = $(el).find("img").first().attr("data-src") || $(el).find("img").first().attr("src") || "";
+                var type = link.includes("/dizi/") ? "series" : "movie";
+                var id = link;
+                try { id = new URL(link).pathname; } catch(e) {}
+                if (name && id && id !== "/") items.push({ id, type, title: name, poster });
+            });
+            return items;
+        }
+
+        // Extract content cards (li.content-card inside ul.content-grid)
+        function extractContentCards($, container) {
+            var items = [];
+            $(container).find("li.content-card").each((j, el) => {
+                var $a = $(el).find("a.card-link").first();
+                var link = $a.attr("href") || "";
+                var name = $(el).find(".card-title").text().trim();
+                if (!name) name = titleFromSlug(link);
+                var poster = $(el).find("img").first().attr("data-src") || $(el).find("img").first().attr("src") || "";
+                var type = link.includes("/dizi/") ? "series" : "movie";
+                var id = link;
+                try { id = new URL(link).pathname; } catch(e) {}
+                if (name && id && id !== "/") items.push({ id, type, title: name, poster });
+            });
+            return items;
+        }
+
+        // Extract episode items (a.episode-list-item)
+        function extractEpisodeItems($, container) {
+            var items = [];
+            $(container).find("a.episode-list-item").each((j, el) => {
+                var link = $(el).attr("href") || "";
+                var name = $(el).find(".ep-title").text().trim();
+                var epInfo = $(el).find(".ep-info").text().trim();
+                if (epInfo) name = name + " - " + epInfo;
+                if (!name) name = titleFromSlug(link);
+                var poster = $(el).find("img").first().attr("data-src") || $(el).find("img").first().attr("src") || "";
+                var type = "series";
+                var id = link;
+                try { id = new URL(link).pathname; } catch(e) {}
+                if (name && id && id.includes("/bolum/")) items.push({ id, type, title: name, poster });
+            });
+            return items;
+        }
+
+        // 1) Fetch homepage
+        var homeRes = await axios({ url: baseUrl, headers: header, method: "GET" });
+        if (homeRes && homeRes.status == 200) {
+            var $ = cheerio.load(homeRes.data);
+
+            // Trend Diziler (first trending-slider)
+            var trendDizi = extractTrendingItems($, "#trendingSlider");
+            if (trendDizi.length > 0) sections.push({ title: "Trend Diziler", items: trendDizi });
+
+            // Son Eklenen Diziler (first content-section with content-grid.large)
+            var sonDizi = extractContentCards($, "ul.content-grid.large");
+            if (sonDizi.length > 0) sections.push({ title: "Son Eklenen Diziler", items: sonDizi });
+
+            // Son Bölümler (latest-episodes-section)
+            var sonBolumler = extractEpisodeItems($, ".latest-episodes-section");
+            if (sonBolumler.length > 0) sections.push({ title: "Son Bölümler", items: sonBolumler.slice(0, 20) });
+
+            // Trend Filmler (second trending-slider)
+            var trendFilm = extractTrendingItems($, "#trendingMoviesSlider");
+            if (trendFilm.length > 0) sections.push({ title: "Trend Filmler", items: trendFilm });
+
+            // Son Eklenen Filmler (content-grid without .large class, after trend filmler)
+            var allContentGrids = $("ul.content-grid").not(".large");
+            var sonFilm = extractContentCards($, allContentGrids);
+            if (sonFilm.length > 0) sections.push({ title: "Son Eklenen Filmler", items: sonFilm });
+        }
+
+        // 2) Fetch diziler page
+        try {
+            var diziRes = await axios({ url: baseUrl + "/diziler", headers: header, method: "GET" });
+            if (diziRes && diziRes.status == 200) {
+                var $d = cheerio.load(diziRes.data);
+                var diziItems = extractContentCards($d, "body");
+                diziItems.forEach(item => item.type = "series");
+                if (diziItems.length > 0) sections.push({ title: "Tüm Diziler", items: diziItems });
+            }
+        } catch(e) { console.log("Diziler page error:", e.message); }
+
+        // 3) Fetch filmler page
+        try {
+            var filmRes = await axios({ url: baseUrl + "/filmler", headers: header, method: "GET" });
+            if (filmRes && filmRes.status == 200) {
+                var $f = cheerio.load(filmRes.data);
+                var filmItems = extractContentCards($f, "body");
+                filmItems.forEach(item => item.type = "movie");
+                if (filmItems.length > 0) sections.push({ title: "Tüm Filmler", items: filmItems });
+            }
+        } catch(e) { console.log("Filmler page error:", e.message); }
+
+        myCache.set("api_homepage", { sections }, 3600);
+        return respond(res, { sections });
     } catch (error) {
         console.log(error);
         return respond(res, { sections: [] });
@@ -165,6 +324,10 @@ app.get("/api/stream/:path(*)", async (req, res) => {
         var contentPath = "/" + req.params.path;
         var video = await listVideo.GetVideos(contentPath);
         if (video) {
+            // If it's an embed URL (Cloudflare protected), return it for client-side iframe playback
+            if (video.embedUrl) {
+                return respond(res, { url: null, embedUrl: video.embedUrl });
+            }
             var encodedUrl = Buffer.from(video.url).toString('base64url');
             var encodedReferer = Buffer.from(video.referer || process.env.PROXY_URL + "/").toString('base64url');
             var proxyUrl = `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encodedUrl}`;
@@ -403,6 +566,8 @@ app.get('/proxy/:referer/:url', async (req, res) => {
     try {
         var targetUrl = Buffer.from(req.params.url, 'base64url').toString();
         var referer = Buffer.from(req.params.referer, 'base64url').toString();
+        console.log('[proxy] target:', targetUrl);
+        console.log('[proxy] referer:', referer);
 
         var response = await axios({
             url: targetUrl,
@@ -418,12 +583,20 @@ app.get('/proxy/:referer/:url', async (req, res) => {
 
         var contentType = response.headers['content-type'] || 'application/octet-stream';
         var body = response.data;
+        console.log('[proxy] response status:', response.status, 'content-type:', contentType, 'size:', body.length);
 
         // If it's an m3u8 playlist, rewrite URLs to go through proxy
-        if (targetUrl.includes('.m3u8') || (contentType && contentType.includes('mpegurl'))) {
+        // Also detect by content: CDN may disguise m3u8 with .jpg extension or wrong content-type
+        var textPreview = body.length < 50000 ? body.toString('utf8', 0, Math.min(body.length, 200)) : '';
+        var isM3u8 = targetUrl.includes('.m3u8')
+            || (contentType && contentType.includes('mpegurl'))
+            || textPreview.trimStart().startsWith('#EXTM3U');
+        if (isM3u8) {
             var text = body.toString('utf8');
             var baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
             var encodedReferer = req.params.referer;
+            console.log('[proxy] m3u8 baseUrl:', baseUrl);
+            console.log('[proxy] m3u8 content (first 500 chars):', text.substring(0, 500));
 
             // Rewrite all non-comment lines (segment URLs) to go through proxy
             text = text.replace(/^((?!#)\S+.*)$/gm, (match) => {
@@ -440,6 +613,7 @@ app.get('/proxy/:referer/:url', async (req, res) => {
                 return `URI="${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encoded}"`;
             });
 
+            console.log('[proxy] rewritten m3u8 (first 500 chars):', text.substring(0, 500));
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Access-Control-Allow-Origin', '*');
             return res.send(text);
@@ -453,9 +627,18 @@ app.get('/proxy/:referer/:url', async (req, res) => {
         }
         return res.send(Buffer.from(body));
     } catch (error) {
-        console.log('Proxy error:', error.message);
+        console.log('[proxy] ERROR for url:', req.params.url);
+        console.log('[proxy] error:', error.message);
+        if (error.response) {
+            console.log('[proxy] error status:', error.response.status);
+        }
         res.status(500).send('Proxy error');
     }
+});
+
+// SPA catch-all: serve index.html for all unmatched routes (React Router)
+app.get('*', function (req, res) {
+    res.sendFile(path.join(__dirname, "frontend", "index.html"));
 });
 
 if (module.parent) {

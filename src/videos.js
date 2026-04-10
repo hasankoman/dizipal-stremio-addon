@@ -4,14 +4,33 @@ const sslfix = require("./sslfix");
 const cheerio = require("cheerio");
 const Axios = require('axios')
 const { setupCache } = require("axios-cache-interceptor");
+const CryptoJS = require('crypto-js');
 
 const instance = Axios.create();
 const axios = setupCache(instance);
 
+const DECRYPT_KEY = "3hPn4uCjTVtfYWcjIcoJQ4cL1WWk1qxXI39egLYOmNv6IblA7eKJz68uU3eLzux1biZLCms0quEjTYniGv5z1JcKbNIsDQFSeIZOBZJz4is6pD7UyWDggWWzTLBQbHcQFpBQdClnuQaMNUHtLHTpzCvZy33p6I7wFBvL4fnXBYH84aUIyWGTRvM2G5cfoNf4705tO2kv";
+
+function decryptIframeUrl(jsonStr) {
+    try {
+        var data = JSON.parse(jsonStr);
+        var salt = CryptoJS.enc.Hex.parse(data.salt);
+        var iv = CryptoJS.enc.Hex.parse(data.iv);
+        var key = CryptoJS.PBKDF2(DECRYPT_KEY, salt, {
+            hasher: CryptoJS.algo.SHA512,
+            keySize: 0x40 / 0x8,
+            iterations: 0x3e7
+        });
+        var result = CryptoJS.AES.decrypt(data.ciphertext, key, { iv: iv });
+        return result.toString(CryptoJS.enc.Utf8);
+    } catch (e) {
+        console.log("Decrypt error:", e.message);
+        return null;
+    }
+}
 
 async function GetVideos(id) {
     try {
-        // Step 1: Load the episode/movie page to get data-cfg and session cookies
         var response = await Axios({
             ...sslfix,
             url: process.env.PROXY_URL + id,
@@ -24,18 +43,30 @@ async function GetVideos(id) {
         });
 
         if (response && response.status == 200) {
-            // Extract cookies from response
+            var $ = cheerio.load(response.data);
+
+            // Method 1: Decrypt encrypted iframe URL from data-rm-k
+            var encryptedEl = $("[data-rm-k]");
+            if (encryptedEl.length > 0) {
+                var encryptedJson = encryptedEl.html();
+                if (encryptedJson) {
+                    var iframeUrl = decryptIframeUrl(encryptedJson);
+                    if (iframeUrl) {
+                        if (!iframeUrl.startsWith("http")) iframeUrl = "https:" + iframeUrl;
+                        // Return the iframe URL for client-side playback (embed player has Cloudflare)
+                        return { url: iframeUrl, embedUrl: iframeUrl, subtitles: null, referer: process.env.PROXY_URL + "/" };
+                    }
+                }
+            }
+
+            // Method 2: data-cfg + ajax-player-config
             var cookies = "";
             var setCookies = response.headers["set-cookie"];
             if (setCookies) {
                 cookies = setCookies.map(c => c.split(";")[0]).join("; ");
             }
-
-            var $ = cheerio.load(response.data);
             var cfg = $("#videoContainer").attr("data-cfg");
-
             if (cfg) {
-                // Step 2: POST to ajax-player-config with the same session cookies
                 var playerResponse = await Axios({
                     ...sslfix,
                     url: process.env.PROXY_URL + "/ajax-player-config",
@@ -50,28 +81,25 @@ async function GetVideos(id) {
                     method: "POST",
                     data: "cfg=" + encodeURIComponent(cfg)
                 });
-
                 if (playerResponse && playerResponse.status == 200 && playerResponse.data) {
                     var data = playerResponse.data;
                     if (data.success && data.config) {
-                        var config = data.config;
-                        var videoUrl = config.v || "";
-                        var videoType = config.t || "embed";
-
+                        var videoUrl = data.config.v || "";
+                        var videoType = data.config.t || "embed";
                         if (videoType === "embed" && videoUrl) {
-                            return await ScrapeVideoUrl(videoUrl);
-                        } else if (videoUrl) {
-                            return { url: videoUrl, subtitles: null };
+                            var scraped = await ScrapeVideoUrl(videoUrl);
+                            if (scraped) return scraped;
+                            // Fallback: return embed URL for client-side iframe playback
+                            return { url: videoUrl, embedUrl: videoUrl, subtitles: null, referer: process.env.PROXY_URL + "/" };
                         }
+                        else if (videoUrl) return { url: videoUrl, subtitles: null };
                     }
                 }
             }
 
-            // Fallback: try old iframe method
+            // Method 3: Fallback old iframe method
             var videoLink = $("#vast_new > iframe").attr("src");
-            if (videoLink) {
-                return await ScrapeVideoUrl(videoLink);
-            }
+            if (videoLink) return await ScrapeVideoUrl(videoLink);
         }
     } catch (error) {
         console.log(error);
@@ -85,8 +113,13 @@ async function ScrapeVideoUrl(scrapeUrl) {
         try { embedOrigin = new URL(scrapeUrl).origin; } catch(e) {}
 
         var scrapeHeader = {
-            "referer": process.env.PROXY_URL,
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
+            "referer": embedOrigin + "/",
+            "origin": embedOrigin,
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "sec-fetch-dest": "iframe",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "cross-site",
         };
         var response = await axios({ url: scrapeUrl, headers: scrapeHeader, method: "GET" });
         if (response && response.status == 200) {

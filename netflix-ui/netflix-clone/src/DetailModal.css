@@ -1,0 +1,418 @@
+/* ── MODAL OVERLAY ── */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* ── MODAL ── */
+.modal {
+  background: var(--bg);
+  border: var(--border-width) solid var(--white);
+  max-width: 800px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  color: var(--white);
+  box-shadow: 8px 8px 0px var(--accent);
+}
+
+.modal::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+.modal::-webkit-scrollbar-thumb {
+  background: var(--accent);
+}
+
+/* ── CLOSE BUTTON ── */
+.modal_close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: var(--bg);
+  color: var(--white);
+  border: var(--border-width) solid var(--white);
+  font-size: 24px;
+  cursor: pointer;
+  z-index: 10;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  transition: background 0.1s, color 0.1s;
+}
+
+.modal_close:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── BANNER ── */
+.modal_banner {
+  width: 100%;
+  height: 300px;
+  background-size: cover;
+  background-position: center;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: var(--border-width) solid var(--white);
+}
+
+.modal_banner_overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 40px 24px 20px;
+  background: linear-gradient(transparent, var(--bg));
+}
+
+.modal_title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  text-shadow: 3px 3px 0px rgba(0, 0, 0, 0.8);
+}
+
+.modal_rating {
+  background: var(--accent);
+  padding: 4px 12px;
+  border: var(--border-width) solid var(--white);
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.modal_year {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* ── DESCRIPTION ── */
+.modal_description {
+  padding: 20px 24px;
+  color: var(--text-muted);
+  line-height: 1.7;
+  font-size: 14px;
+  font-weight: 400;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+/* ── ACTIONS ── */
+.modal_actions {
+  padding: 20px 24px 24px;
+}
+
+.modal_play_main {
+  width: 100%;
+  padding: 16px;
+  background: var(--accent);
+  color: var(--white);
+  border: var(--border-width) solid var(--white);
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.1s, background 0.1s;
+}
+
+.modal_play_main:hover {
+  background: var(--accent-hover);
+  box-shadow: 6px 6px 0px var(--white);
+}
+
+.modal_play_main:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── TRAILER BUTTON ── */
+.modal_trailer_btn {
+  width: 100%;
+  padding: 14px;
+  background: transparent;
+  color: var(--white);
+  border: var(--border-width) solid var(--white);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  margin-top: 8px;
+  transition: background 0.1s, box-shadow 0.1s, border-color 0.1s;
+}
+
+.modal_trailer_btn:hover {
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.modal_trailer_btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── PLAYER PAGE ── */
+.modal_player_page {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal_alt_players {
+  display: flex;
+  gap: 0;
+  border-top: var(--border-width) solid var(--border-muted);
+}
+
+.modal_alt_btn {
+  flex: 1;
+  padding: 12px 16px;
+  text-decoration: none;
+  text-align: center;
+  font-family: var(--font);
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  background: var(--surface);
+  border-right: var(--border-width) solid var(--border-muted);
+  transition: color 0.1s, background 0.1s;
+}
+
+.modal_alt_btn:last-child {
+  border-right: none;
+}
+
+.modal_alt_btn:hover {
+  color: var(--white);
+  background: var(--card);
+}
+
+/* ── EPISODES ── */
+.modal_episodes {
+  padding: 0 24px 24px;
+}
+
+.modal_episodes > .modal_trailer_btn {
+  margin-bottom: 16px;
+}
+
+.season_tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.season_tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.season_tab {
+  padding: 10px 24px;
+  border: var(--border-width) solid var(--border-muted);
+  border-bottom: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+
+.season_tab:hover {
+  border-color: var(--white);
+  color: var(--white);
+}
+
+.season_tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--white);
+}
+
+.modal_episode_list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.modal_episode_btn {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border-muted);
+  border-top: none;
+  color: var(--white);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font);
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.modal_episode_btn:first-child {
+  border-top: var(--border-width) solid var(--border-muted);
+}
+
+.modal_episode_btn:hover {
+  background: var(--card);
+  border-color: var(--accent);
+}
+
+.modal_episode_btn:hover + .modal_episode_btn {
+  border-top-color: var(--accent);
+}
+
+.modal_episode_btn:disabled {
+  opacity: 0.4;
+}
+
+.ep_number {
+  background: var(--accent);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+  border: var(--border-width) solid var(--white);
+}
+
+.ep_title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.5px;
+}
+
+/* ── LOADING / EMPTY ── */
+.modal_loading,
+.modal_no_episodes {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  font-size: 14px;
+}
+
+/* ── PLAYER ── */
+.modal_player {
+  position: relative;
+  width: 100%;
+  background: #000;
+}
+
+.modal_video {
+  width: 100%;
+  max-height: 80vh;
+  background: #000;
+  display: block;
+}
+
+.modal_embed {
+  width: 100%;
+  aspect-ratio: 16/9;
+  border: none;
+  background: #000;
+  display: block;
+}
+
+.modal_back_btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: var(--bg);
+  color: var(--white);
+  border: var(--border-width) solid var(--white);
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: background 0.1s;
+}
+
+.modal_back_btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.modal_player_error {
+  padding: 14px 16px;
+  background: var(--accent);
+  color: var(--white);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-top: var(--border-width) solid var(--white);
+}
+
+@media (max-width: 600px) {
+  .modal {
+    box-shadow: 4px 4px 0px var(--accent);
+  }
+  .modal_banner {
+    height: 200px;
+  }
+  .modal_title {
+    font-size: 1.4rem;
+    letter-spacing: 1px;
+  }
+  .modal_play_options {
+    flex-direction: column;
+  }
+  .modal_play_btn {
+    min-width: unset;
+  }
+  .season_tab {
+    padding: 8px 16px;
+    font-size: 11px;
+  }
+}

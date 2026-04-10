@@ -1,0 +1,73 @@
+/* ── SEARCH BAR ── */
+.searchbar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+}
+
+.searchbar_input {
+  padding: 8px 16px;
+  border: var(--border-width) solid var(--border-muted);
+  border-right: none;
+  background: var(--surface);
+  color: var(--white);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  width: 220px;
+  outline: none;
+  letter-spacing: 0.5px;
+  transition: border-color 0.1s;
+}
+
+.searchbar_input::placeholder {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.searchbar_input:focus {
+  border-color: var(--accent);
+}
+
+.searchbar_button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: var(--white);
+  border: var(--border-width) solid var(--accent);
+  cursor: pointer;
+  font-family: var(--font);
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transition: background 0.1s, box-shadow 0.1s;
+}
+
+.searchbar_button:hover {
+  background: var(--accent-hover);
+  box-shadow: 2px 2px 0px var(--white);
+}
+
+.searchbar_button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .searchbar_input {
+    width: 120px;
+    font-size: 12px;
+    padding: 7px 10px;
+  }
+  .searchbar_button {
+    padding: 7px 12px;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+}
