@@ -39,3 +39,5 @@ echo "  Dizipal Addon kuruldu!"
 echo "  Stremio URL: http://${VPS_IP}:7000/addon/manifest.json"
 echo "  Website:     http://${VPS_IP}:7000"
 echo "========================================="
+
+

@@ -30,6 +30,7 @@ const STALE_ERROR_AGE = 7 * 24 * 60 * 60; // 7 days
 const myCache = new NodeCache({ stdTTL: 30*60, checkperiod: 300 });
 
 app.use(express.static(path.join(__dirname, "static")));
+app.use(express.static(path.join(__dirname, "frontend"), { index: false }));
 
 var respond = function (res, data) {
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -40,8 +41,7 @@ var respond = function (res, data) {
 
 
 app.get('/', function (req, res) {
-        res.set('Content-Type', 'text/html');
-        res.send(landing(MANIFEST));
+        res.sendFile(path.join(__dirname, "frontend", "index.html"));
 });
 
 app.get("/:userConf?/configure", function (req, res) {
