@@ -6,8 +6,6 @@ const fs = require('fs')
 const Path = require("path");
 const express = require("express");
 const app = express();
-const cookieParser = require("cookie-parser");
-const crypto = require("crypto");
 const searchVideo = require("./src/search");
 const listVideo = require("./src/videos");
 const path = require("path");
@@ -21,75 +19,15 @@ const { setupCache } = require("axios-cache-interceptor");
 const instance = Axios.create();
 const axios = setupCache(instance);
 
-const SITE_PASSWORD = process.env.SITE_PASSWORD || "koman123";
-const AUTH_SECRET = crypto.randomBytes(32).toString("hex");
 
-function makeToken() {
-    return crypto.createHmac("sha256", AUTH_SECRET).update(SITE_PASSWORD).digest("hex");
-}
+
+
 
 const CACHE_MAX_AGE = 4 * 60 * 60; // 4 hours in seconds
 const STALE_REVALIDATE_AGE = 4 * 60 * 60; // 4 hours
 const STALE_ERROR_AGE = 7 * 24 * 60 * 60; // 7 days
 
 const myCache = new NodeCache({ stdTTL: 30*60, checkperiod: 300 });
-
-app.use(cookieParser());
-app.use(express.urlencoded({ extended: false }));
-
-// Auth middleware — addon ve proxy yollarini atla
-app.use((req, res, next) => {
-    // Stremio addon ve proxy isteklerini atla
-    if (req.path.startsWith("/addon/") || req.path.startsWith("/proxy/") || req.path === "/login") {
-        return next();
-    }
-    if (req.cookies && req.cookies.auth === makeToken()) {
-        return next();
-    }
-    return res.redirect("/login");
-});
-
-app.get("/login", (req, res) => {
-    if (req.cookies && req.cookies.auth === makeToken()) {
-        return res.redirect("/");
-    }
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Giris - KomanMovie</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0a0a;color:#fff;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.box{background:#141414;border:2px solid #222;padding:40px;width:340px}
-h1{font-size:18px;text-transform:uppercase;letter-spacing:3px;margin-bottom:24px;text-align:center}
-input{width:100%;padding:12px;background:#0a0a0a;border:2px solid #333;color:#fff;font-size:14px;margin-bottom:16px;outline:none}
-input:focus{border-color:#e50914}
-button{width:100%;padding:12px;background:#e50914;color:#fff;border:none;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;cursor:pointer}
-button:hover{background:#ff1a1a}
-.err{color:#e50914;font-size:12px;text-align:center;margin-bottom:12px;text-transform:uppercase;letter-spacing:1px}
-</style></head><body>
-<div class="box">
-<h1>KomanMovie</h1>
-${req.query.err ? '<p class="err">Yanlis sifre</p>' : ''}
-<form method="POST" action="/login">
-<input type="password" name="password" placeholder="Sifre" autofocus required>
-<button type="submit">Giris</button>
-</form>
-</div></body></html>`);
-});
-
-app.post("/login", (req, res) => {
-    if (req.body && req.body.password === SITE_PASSWORD) {
-        res.cookie("auth", makeToken(), { httpOnly: true, maxAge: 30 * 24 * 60 * 60 * 1000, sameSite: "lax" });
-        return res.redirect("/");
-    }
-    return res.redirect("/login?err=1");
-});
-
-app.get("/logout", (req, res) => {
-    res.clearCookie("auth");
-    res.redirect("/login");
-});
 
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, "frontend", "netflix-clone", "build"), { index: false }));
