@@ -1,9 +1,11 @@
 FROM node:20-alpine
 
-WORKDIR /root
+WORKDIR /app
 
 COPY . .
 
 RUN npm install
+
+RUN cd frontend/netflix-clone && npm install && npm run build
 
 CMD ["node", "index.js"]
