@@ -56,6 +56,24 @@
   letter-spacing: 1px;
 }
 
+/* ── SECTION ── */
+.search-results_section {
+  margin-bottom: 32px;
+}
+
+.search-results_section-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: var(--border-width) solid var(--border-muted);
+  padding-bottom: 10px;
+}
+
 /* ── GRID ── */
 .search-results_grid {
   display: grid;

@@ -13,31 +13,40 @@ async function SearchMovieAndSeries(name) {
     try {
         var response = await axios({
             ...sslfix,
-            url: `${process.env.PROXY_URL}/ajax-search?q=${encodeURIComponent(name)}`,
+            url: `${process.env.PROXY_URL}/arama?q=${encodeURIComponent(name)}`,
             headers: header,
             method: "GET"
         });
 
-        if (response && response.status == 200 && response.data && response.data.success) {
-            return response.data.results.map(item => {
-                var type = "movie";
-                if (item.type === "Dizi") type = "series";
+        if (response && response.status == 200) {
+            var $ = cheerio.load(response.data);
+            var results = [];
 
-                // Extract the path from the full URL
-                var url = item.url;
-                try {
-                    url = new URL(item.url).pathname;
-                } catch(e) {}
+            $("article.content-card").each((i, el) => {
+                var $a = $(el).find("a.card-link").first();
+                var link = $a.attr("href") || "";
+                var title = $(el).find(".card-title").text().trim();
+                var poster = $(el).find("img").first().attr("data-src") || $(el).find("img").first().attr("src") || "";
+                var year = $(el).find(".card-year").text().trim();
+                var badge = $(el).find(".card-badge").text().trim();
+                var type = (badge === "Dizi" || link.includes("/dizi/")) ? "series" : "movie";
 
-                return {
-                    title: item.title,
-                    type: type,
-                    url: url,
-                    poster: item.poster || "",
-                    genres: item.year ? String(item.year) : "",
-                    rating: item.rating || ""
-                };
+                var url = link;
+                try { url = new URL(link).pathname; } catch(e) {}
+
+                if (title && url && url !== "/") {
+                    results.push({
+                        title: title,
+                        type: type,
+                        url: url,
+                        poster: poster,
+                        genres: year || "",
+                        rating: ""
+                    });
+                }
             });
+
+            return results;
         }
     } catch (error) {
         if (error) console.log(error);

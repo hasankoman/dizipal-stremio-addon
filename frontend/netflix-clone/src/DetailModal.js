@@ -79,8 +79,13 @@ function DetailModal({ content, onClose }) {
             const hls = new window.Hls({
                 maxBufferLength: 30,
                 maxMaxBufferLength: 60,
+                fragLoadingMaxRetry: 5,
+                fragLoadingRetryDelay: 1000,
+                manifestLoadingMaxRetry: 3,
+                levelLoadingMaxRetry: 3,
             });
             hlsRef.current = hls;
+            let recoverAttempts = 0;
             hls.loadSource(url);
             hls.attachMedia(video);
             hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
@@ -89,7 +94,17 @@ function DetailModal({ content, onClose }) {
             hls.on(window.Hls.Events.ERROR, (event, data) => {
                 console.error("[initPlayer] HLS ERROR:", data);
                 if (data.fatal) {
-                    setPlayerError("Video yuklenemedi: " + data.details + (data.response?.code ? ` (HTTP ${data.response.code})` : ""));
+                    if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && recoverAttempts < 3) {
+                        recoverAttempts++;
+                        console.log("[initPlayer] Network error, retrying... attempt", recoverAttempts);
+                        hls.startLoad();
+                    } else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && recoverAttempts < 3) {
+                        recoverAttempts++;
+                        console.log("[initPlayer] Media error, recovering... attempt", recoverAttempts);
+                        hls.recoverMediaError();
+                    } else {
+                        setPlayerError("Video yuklenemedi: " + data.details + (data.response?.code ? ` (HTTP ${data.response.code})` : ""));
+                    }
                 }
             });
         } else {

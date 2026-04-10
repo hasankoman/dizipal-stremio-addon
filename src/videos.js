@@ -53,7 +53,10 @@ async function GetVideos(id) {
                     var iframeUrl = decryptIframeUrl(encryptedJson);
                     if (iframeUrl) {
                         if (!iframeUrl.startsWith("http")) iframeUrl = "https:" + iframeUrl;
-                        // Return the iframe URL for client-side playback (embed player has Cloudflare)
+                        // Try to scrape the actual video URL from the embed page
+                        var scraped = await ScrapeVideoUrl(iframeUrl, process.env.PROXY_URL + "/");
+                        if (scraped) return scraped;
+                        // Fallback: return the iframe URL for client-side playback
                         return { url: iframeUrl, embedUrl: iframeUrl, subtitles: null, referer: process.env.PROXY_URL + "/" };
                     }
                 }
@@ -87,7 +90,7 @@ async function GetVideos(id) {
                         var videoUrl = data.config.v || "";
                         var videoType = data.config.t || "embed";
                         if (videoType === "embed" && videoUrl) {
-                            var scraped = await ScrapeVideoUrl(videoUrl);
+                            var scraped = await ScrapeVideoUrl(videoUrl, process.env.PROXY_URL + "/");
                             if (scraped) return scraped;
                             // Fallback: return embed URL for client-side iframe playback
                             return { url: videoUrl, embedUrl: videoUrl, subtitles: null, referer: process.env.PROXY_URL + "/" };
@@ -99,7 +102,7 @@ async function GetVideos(id) {
 
             // Method 3: Fallback old iframe method
             var videoLink = $("#vast_new > iframe").attr("src");
-            if (videoLink) return await ScrapeVideoUrl(videoLink);
+            if (videoLink) return await ScrapeVideoUrl(videoLink, process.env.PROXY_URL + "/");
         }
     } catch (error) {
         console.log(error);
@@ -107,21 +110,24 @@ async function GetVideos(id) {
 }
 
 
-async function ScrapeVideoUrl(scrapeUrl) {
+async function ScrapeVideoUrl(scrapeUrl, customReferer) {
     try {
         var embedOrigin = scrapeUrl;
         try { embedOrigin = new URL(scrapeUrl).origin; } catch(e) {}
 
+        var refererUrl = customReferer || embedOrigin + "/";
+        var refererOrigin = customReferer ? customReferer.replace(/\/$/, '') : embedOrigin;
+
         var scrapeHeader = {
-            "referer": embedOrigin + "/",
-            "origin": embedOrigin,
+            "referer": refererUrl,
+            "origin": refererOrigin,
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
             "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "sec-fetch-dest": "iframe",
             "sec-fetch-mode": "navigate",
             "sec-fetch-site": "cross-site",
         };
-        var response = await axios({ url: scrapeUrl, headers: scrapeHeader, method: "GET" });
+        var response = await Axios({ url: scrapeUrl, headers: scrapeHeader, method: "GET" });
         if (response && response.status == 200) {
             var html = response.data;
 

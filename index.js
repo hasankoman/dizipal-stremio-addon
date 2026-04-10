@@ -6,6 +6,8 @@ const fs = require('fs')
 const Path = require("path");
 const express = require("express");
 const app = express();
+const cookieParser = require("cookie-parser");
+const crypto = require("crypto");
 const searchVideo = require("./src/search");
 const listVideo = require("./src/videos");
 const path = require("path");
@@ -19,15 +21,75 @@ const { setupCache } = require("axios-cache-interceptor");
 const instance = Axios.create();
 const axios = setupCache(instance);
 
+const SITE_PASSWORD = process.env.SITE_PASSWORD || "koman123";
+const AUTH_SECRET = crypto.randomBytes(32).toString("hex");
 
-
-
+function makeToken() {
+    return crypto.createHmac("sha256", AUTH_SECRET).update(SITE_PASSWORD).digest("hex");
+}
 
 const CACHE_MAX_AGE = 4 * 60 * 60; // 4 hours in seconds
 const STALE_REVALIDATE_AGE = 4 * 60 * 60; // 4 hours
 const STALE_ERROR_AGE = 7 * 24 * 60 * 60; // 7 days
 
 const myCache = new NodeCache({ stdTTL: 30*60, checkperiod: 300 });
+
+app.use(cookieParser());
+app.use(express.urlencoded({ extended: false }));
+
+// Auth middleware — addon ve proxy yollarini atla
+app.use((req, res, next) => {
+    // Stremio addon ve proxy isteklerini atla
+    if (req.path.startsWith("/addon/") || req.path.startsWith("/proxy/") || req.path === "/login") {
+        return next();
+    }
+    if (req.cookies && req.cookies.auth === makeToken()) {
+        return next();
+    }
+    return res.redirect("/login");
+});
+
+app.get("/login", (req, res) => {
+    if (req.cookies && req.cookies.auth === makeToken()) {
+        return res.redirect("/");
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Giris - KomanMovie</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#fff;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.box{background:#141414;border:2px solid #222;padding:40px;width:340px}
+h1{font-size:18px;text-transform:uppercase;letter-spacing:3px;margin-bottom:24px;text-align:center}
+input{width:100%;padding:12px;background:#0a0a0a;border:2px solid #333;color:#fff;font-size:14px;margin-bottom:16px;outline:none}
+input:focus{border-color:#e50914}
+button{width:100%;padding:12px;background:#e50914;color:#fff;border:none;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;cursor:pointer}
+button:hover{background:#ff1a1a}
+.err{color:#e50914;font-size:12px;text-align:center;margin-bottom:12px;text-transform:uppercase;letter-spacing:1px}
+</style></head><body>
+<div class="box">
+<h1>KomanMovie</h1>
+${req.query.err ? '<p class="err">Yanlis sifre</p>' : ''}
+<form method="POST" action="/login">
+<input type="password" name="password" placeholder="Sifre" autofocus required>
+<button type="submit">Giris</button>
+</form>
+</div></body></html>`);
+});
+
+app.post("/login", (req, res) => {
+    if (req.body && req.body.password === SITE_PASSWORD) {
+        res.cookie("auth", makeToken(), { httpOnly: true, maxAge: 30 * 24 * 60 * 60 * 1000, sameSite: "lax" });
+        return res.redirect("/");
+    }
+    return res.redirect("/login?err=1");
+});
+
+app.get("/logout", (req, res) => {
+    res.clearCookie("auth");
+    res.redirect("/login");
+});
 
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, "frontend", "netflix-clone", "build"), { index: false }));
@@ -76,23 +138,27 @@ app.get('/:userConf/manifest.json', function (req, res) {
 app.get("/api/search", async (req, res) => {
     try {
         var query = req.query.q;
-        if (!query || query.length < 2) return respond(res, { results: [] });
+        if (!query || query.length < 2) return respond(res, { diziler: [], filmler: [] });
         var cached = myCache.get("api_search_" + query);
-        if (cached) return respond(res, { results: cached });
+        if (cached) return respond(res, cached);
         var video = await searchVideo.SearchMovieAndSeries(query);
-        var results = (video || []).map(item => ({
+        var all = (video || []).map(item => ({
             id: item.url,
-            type: item.type === "Dizi" ? "series" : (item.type || "movie"),
+            type: item.type || "movie",
             title: item.title,
             poster: item.poster || "",
-            year: item.rating || "",
+            year: item.genres || "",
             url: item.url
         }));
-        myCache.set("api_search_" + query, results);
-        return respond(res, { results });
+        var result = {
+            diziler: all.filter(i => i.type === "series"),
+            filmler: all.filter(i => i.type === "movie")
+        };
+        myCache.set("api_search_" + query, result);
+        return respond(res, result);
     } catch (error) {
         console.log(error);
-        return respond(res, { results: [] });
+        return respond(res, { diziler: [], filmler: [] });
     }
 });
 
@@ -569,16 +635,22 @@ app.get('/proxy/:referer/:url', async (req, res) => {
         console.log('[proxy] target:', targetUrl);
         console.log('[proxy] referer:', referer);
 
-        var response = await axios({
+        var response = await Axios({
             url: targetUrl,
             method: "GET",
             headers: {
                 "Referer": referer,
                 "Origin": referer.replace(/\/$/, ''),
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                "Accept": "*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "cross-site",
             },
             responseType: 'arraybuffer',
             timeout: 30000,
+            maxRedirects: 5,
         });
 
         var contentType = response.headers['content-type'] || 'application/octet-stream';
@@ -587,7 +659,7 @@ app.get('/proxy/:referer/:url', async (req, res) => {
 
         // If it's an m3u8 playlist, rewrite URLs to go through proxy
         // Also detect by content: CDN may disguise m3u8 with .jpg extension or wrong content-type
-        var textPreview = body.length < 50000 ? body.toString('utf8', 0, Math.min(body.length, 200)) : '';
+        var textPreview = body.toString('utf8', 0, Math.min(body.length, 200));
         var isM3u8 = targetUrl.includes('.m3u8')
             || (contentType && contentType.includes('mpegurl'))
             || textPreview.trimStart().startsWith('#EXTM3U');

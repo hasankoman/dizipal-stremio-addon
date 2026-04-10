@@ -13,10 +13,10 @@ function SearchBar({ onResults }) {
         setLoading(true);
         try {
             const res = await axios.get(requests.search(query));
-            onResults(res.data.results || []);
+            onResults({ diziler: res.data.diziler || [], filmler: res.data.filmler || [] });
         } catch (err) {
             console.log(err);
-            onResults([]);
+            onResults({ diziler: [], filmler: [] });
         }
         setLoading(false);
     }
