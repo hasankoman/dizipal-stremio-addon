@@ -2,14 +2,15 @@
 # Dizipal Stremio Addon - VPS Setup Script
 # Usage: curl -sL YOUR_RAW_URL | bash -s YOUR_VPS_IP
 
-VPS_IP="${1:-$(curl -s ifconfig.me)}"
+VPS_IP="72.62.145.53"
 
 echo "==> Installing Node.js..."
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt install -y nodejs git
 
 echo "==> Cloning project..."
-cd /opt
+mkdir -p /opt/hasankoman
+cd /opt/hasankoman
 git clone https://github.com/hasankoman/dizipal-stremio-addon.git dizipal
 cd dizipal
 
