@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: dizipal-addon
+    runtime: node
+    region: frankfurt
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 7000
+      - key: PROXY_URL
+        value: https://dizipal2042.com
+      - key: URLGETSTATUS
+        value: false
+      - key: HOSTING_URL
+        sync: false
