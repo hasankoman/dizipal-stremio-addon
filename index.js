@@ -30,7 +30,7 @@ const STALE_ERROR_AGE = 7 * 24 * 60 * 60; // 7 days
 const myCache = new NodeCache({ stdTTL: 30*60, checkperiod: 300 });
 
 app.use(express.static(path.join(__dirname, "static")));
-app.use(express.static(path.join(__dirname, "frontend"), { index: false }));
+app.use(express.static(path.join(__dirname, "frontend", "netflix-clone", "build"), { index: false }));
 
 var respond = function (res, data) {
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -41,7 +41,7 @@ var respond = function (res, data) {
 
 
 app.get('/', function (req, res) {
-        res.sendFile(path.join(__dirname, "frontend", "index.html"));
+        res.sendFile(path.join(__dirname, "frontend", "netflix-clone", "build", "index.html"));
 });
 
 app.get("/:userConf?/configure", function (req, res) {
@@ -638,7 +638,7 @@ app.get('/proxy/:referer/:url', async (req, res) => {
 
 // SPA catch-all: serve index.html for all unmatched routes (React Router)
 app.get('*', function (req, res) {
-    res.sendFile(path.join(__dirname, "frontend", "index.html"));
+    res.sendFile(path.join(__dirname, "frontend", "netflix-clone", "build", "index.html"));
 });
 
 if (module.parent) {
