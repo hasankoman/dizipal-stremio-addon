@@ -81,6 +81,24 @@
   box-shadow: var(--shadow-sm);
 }
 
+.row_card_img {
+  position: relative;
+}
+
+.row_card_badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: var(--accent);
+  color: var(--white);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-right: var(--border-width) solid var(--white);
+  border-bottom: var(--border-width) solid var(--white);
+  letter-spacing: 1px;
+}
+
 .row_thumbnail {
   width: 100%;
   aspect-ratio: 2/3;
@@ -121,10 +139,10 @@
     letter-spacing: 2px;
   }
   .row_card {
-    width: 120px;
+    width: 150px;
   }
   .row_thumbnail {
-    width: 120px;
-    height: 172px;
+    width: 150px;
+    height: 215px;
   }
 }

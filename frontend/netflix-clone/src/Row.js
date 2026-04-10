@@ -40,21 +40,40 @@ function Row({ title, isHomepage, onSelect, onNavigate }) {
                         )}
                     </div>
                     <div className="row_thumbnails">
-                        {section.items.map((item, j) => (
-                            <div
-                                key={item.id || j}
-                                className="row_card"
-                                onClick={() => onSelect(item)}
-                            >
-                                <img
-                                    className="row_thumbnail"
-                                    src={item.poster}
-                                    alt={item.title}
-                                    onError={(e) => { e.target.src = "https://via.placeholder.com/200x300?text=No+Image"; }}
-                                />
-                                <span className="row_card_title">{item.title}</span>
-                            </div>
-                        ))}
+                        {section.items.map((item, j) => {
+                            const isBolum = item.id?.includes("/bolum/");
+                            let episodeTag = null;
+                            let cleanTitle = item.title;
+
+                            if (isBolum) {
+                                const slug = item.id.replace("/bolum/", "");
+                                const match = slug.match(/^(.+?)-(\d+)-sezon-(\d+)-bolum$/);
+                                if (match) {
+                                    episodeTag = `S${match[2]}B${match[3]}`;
+                                    cleanTitle = item.title
+                                        .replace(/\s*-?\s*\d+\.?\s*sezon\s*\d+\.?\s*b[oö]l[uü]m\s*/i, "")
+                                        .trim();
+                                }
+                            }
+
+                            return (
+                                <div
+                                    key={item.id || j}
+                                    className="row_card"
+                                    onClick={() => onSelect(item)}
+                                >
+                                    <div className="row_card_img">
+                                        <img
+                                            className="row_thumbnail"
+                                            src={item.poster}
+                                            alt={item.title}
+                                            onError={(e) => { e.target.src = "https://via.placeholder.com/200x300?text=No+Image"; }}
+                                        />
+                                        {episodeTag && <span className="row_card_badge">{episodeTag}</span>}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             ))}
