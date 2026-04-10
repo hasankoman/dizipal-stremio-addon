@@ -72,6 +72,111 @@ app.get('/:userConf/manifest.json', function (req, res) {
         }
 });
 
+// API for frontend
+app.get("/api/search", async (req, res) => {
+    try {
+        var query = req.query.q;
+        if (!query || query.length < 2) return respond(res, { results: [] });
+        var cached = myCache.get("api_search_" + query);
+        if (cached) return respond(res, { results: cached });
+        var video = await searchVideo.SearchMovieAndSeries(query);
+        var results = (video || []).map(item => ({
+            id: item.url,
+            type: item.type === "Dizi" ? "series" : (item.type || "movie"),
+            title: item.title,
+            poster: item.poster || "",
+            year: item.rating || "",
+            url: item.url
+        }));
+        myCache.set("api_search_" + query, results);
+        return respond(res, { results });
+    } catch (error) {
+        console.log(error);
+        return respond(res, { results: [] });
+    }
+});
+
+app.get("/api/homepage", async (req, res) => {
+    try {
+        var cached = myCache.get("api_homepage");
+        if (cached) return respond(res, cached);
+
+        const cheerio = require("cheerio");
+        var response = await axios({ url: process.env.PROXY_URL, headers: header, method: "GET" });
+        if (response && response.status == 200) {
+            var $ = cheerio.load(response.data);
+            var sections = [];
+
+            $(".content-section, .swiper-container, .section-container, [class*='section']").each((i, el) => {
+                var title = $(el).find("h2, h3, .section-title, .block-title").first().text().trim();
+                if (!title) return;
+                var items = [];
+                $(el).find(".content-card, article, .poster-item, .movie-item").each((j, card) => {
+                    var link = $(card).find("a").first().attr("href") || "";
+                    var name = $(card).find(".card-title, h3, h4, img").first().attr("alt") || $(card).find(".card-title, h3").first().text().trim();
+                    var poster = $(card).find("img").first().attr("data-src") || $(card).find("img").first().attr("src") || "";
+                    var type = link.includes("/dizi/") ? "series" : "movie";
+                    var id = link;
+                    try { id = new URL(link).pathname; } catch(e) {}
+                    if (name && id) items.push({ id, type, title: name, poster });
+                });
+                if (items.length > 0) sections.push({ title, items });
+            });
+
+            myCache.set("api_homepage", { sections }, 3600);
+            return respond(res, { sections });
+        }
+        return respond(res, { sections: [] });
+    } catch (error) {
+        console.log(error);
+        return respond(res, { sections: [] });
+    }
+});
+
+app.get("/api/detail/:path(*)", async (req, res) => {
+    try {
+        var contentPath = "/" + req.params.path;
+        var cached = myCache.get("api_detail_" + contentPath);
+        if (cached) return respond(res, cached);
+
+        var meta = await searchVideo.SearchMetaMovieAndSeries(contentPath, contentPath.includes("/dizi/") ? "series" : "movie");
+        var episodes = [];
+        if (contentPath.includes("/dizi/") && meta && meta.season) {
+            for (let i = 1; i <= meta.season; i++) {
+                var eps = await searchVideo.SearchDetailMovieAndSeries(contentPath, "series", i);
+                if (eps) {
+                    eps.forEach(ep => {
+                        if (ep.id) episodes.push({ ...ep, season: i });
+                    });
+                }
+            }
+        }
+        var result = { meta, episodes };
+        myCache.set("api_detail_" + contentPath, result);
+        return respond(res, result);
+    } catch (error) {
+        console.log(error);
+        return respond(res, { meta: null, episodes: [] });
+    }
+});
+
+app.get("/api/stream/:path(*)", async (req, res) => {
+    try {
+        var contentPath = "/" + req.params.path;
+        var video = await listVideo.GetVideos(contentPath);
+        if (video) {
+            var encodedUrl = Buffer.from(video.url).toString('base64url');
+            var encodedReferer = Buffer.from(video.referer || process.env.PROXY_URL + "/").toString('base64url');
+            var proxyUrl = `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encodedUrl}`;
+            return respond(res, { url: proxyUrl, directUrl: video.url, referer: video.referer });
+        }
+        return respond(res, { url: null });
+    } catch (error) {
+        console.log(error);
+        return respond(res, { url: null });
+    }
+});
+
 //CODE
 app.get("/addon/catalog/:type/:id/search=:search", async (req, res, next) => {
     try {
