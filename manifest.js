@@ -1,23 +1,23 @@
 require("dotenv").config()
 const manifest = {
-    id: 'org.dizipal-stremio-addon',
+    id: 'org.komanmovie',
     version: '1.0.2',
-    name: 'Dizipal',
-    description: "Dizipal'den dizi ve filmleri stremionuza getirir.  Proxy Kullandığımız için eklenti yavaş çalışabilir.",
-    contactEmail: "eyup.elitass@gmail.com",
-    logo: `${process.env.HOSTING_URL}/images/dizipal.png`,
+    name: 'KomanMovie',
+    description: "Film ve dizileri izleyin.",
+    contactEmail: "hasan@hasankoman.dev",
+    logo: `${process.env.HOSTING_URL}/images/logo.png`,
     background: `${process.env.HOSTING_URL}/images/background.jpg`,
     behaviorHints: {
         configurable: false,
         configurationRequired: true,
     },
     config: [{
-        key: "dizipal",
+        key: "komanmovie",
         required: false
     }],
     catalogs: [{
         type: "series",
-        id: "dizipal",
+        id: "komanmovie",
         extra: [{
             name: "search",
             isRequired: true
@@ -25,7 +25,7 @@ const manifest = {
     },
     {
         type: "movie",
-        id: "dizipal",
+        id: "komanmovie",
         extra: [{
             name: "search",
             isRequired: true

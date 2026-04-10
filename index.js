@@ -182,7 +182,7 @@ app.get("/addon/catalog/:type/:id/search=:search", async (req, res, next) => {
     try {
         var { type, id, search } = req.params;
         search = search.replace(".json", "");
-        if (id == "dizipal") {
+        if (id == "komanmovie") {
             var cached = myCache.get(search + type)
             if (cached) {
                 return respond(res, { metas: cached,cacheMaxAge: CACHE_MAX_AGE, staleRevalidate: STALE_REVALIDATE_AGE, staleError: STALE_ERROR_AGE });
