@@ -64,18 +64,91 @@
   background: var(--accent);
 }
 
+/* ── HAMBURGER (hidden on desktop) ── */
+.nav_hamburger {
+  display: none;
+}
+
 @media (max-width: 600px) {
   .nav {
     padding: 0 12px;
-    gap: 8px;
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 60px;
+    gap: 0;
   }
+
   .nav_logo_text {
     font-size: 1rem;
     letter-spacing: 1px;
+    line-height: 56px;
   }
+
+  .nav_hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    background: none;
+    border: var(--border-width) solid var(--white);
+    color: var(--white);
+    padding: 8px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .nav_hamburger:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  /* ── hide links & search on mobile by default ── */
+  .nav_links {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .nav .searchbar {
+    display: none;
+  }
+
+  /* ── show when menu is open ── */
+  .nav--open .nav_links {
+    display: flex;
+    border-top: 1px solid var(--border-muted);
+  }
+
+  .nav--open .searchbar {
+    display: flex;
+    width: 100%;
+    margin-left: 0;
+    padding: 12px 0;
+  }
+
+  .nav--open .searchbar_input {
+    flex: 1;
+    width: auto;
+  }
+
+  /* ── mobile nav link style ── */
   .nav_link {
-    font-size: 11px;
-    padding: 6px 10px;
-    letter-spacing: 1px;
+    font-size: 13px;
+    padding: 14px 12px;
+    letter-spacing: 2px;
+    text-align: left;
+    border: none;
+    border-bottom: 1px solid var(--border-muted);
+  }
+
+  .nav_link:hover {
+    border: none;
+    border-bottom: 1px solid var(--border-muted);
+    background: var(--surface);
+  }
+
+  .nav_link--active {
+    border: none;
+    border-bottom: 1px solid var(--border-muted);
   }
 }
