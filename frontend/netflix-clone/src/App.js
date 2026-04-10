@@ -20,8 +20,9 @@ function App() {
     return (
         <div className="App">
             <nav className={`nav ${menuOpen ? "nav--open" : ""}`}>
-                <span className="nav_logo_text" onClick={() => { setListPage(null); setSearchResults(null); setMenuOpen(false); }}>
-                    KomanMovie
+                <span className="nav_logo" lang="en" onClick={() => { setListPage(null); setSearchResults(null); setMenuOpen(false); }}>
+                    <img className="nav_logo_img" src="/logo192.png" alt="KomanMovie" />
+                    <span className="nav_logo_text">KomanMovie</span>
                 </span>
                 <button className="nav_hamburger" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu">
                     {menuOpen ? (

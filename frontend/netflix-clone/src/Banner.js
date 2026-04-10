@@ -9,7 +9,7 @@ function Banner({ onSelect }) {
             }} />
             <div className="banner_content">
                 <div className="banner_label">Film &amp; Dizi</div>
-                <h1 className="banner_title">
+                <h1 className="banner_title" lang="en">
                     <span className="banner_title_line">Koman</span>
                     <span className="banner_title_line banner_title_outline">Movie</span>
                 </h1>

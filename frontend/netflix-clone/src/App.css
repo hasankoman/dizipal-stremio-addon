@@ -18,18 +18,29 @@
   border-bottom: var(--border-width) solid var(--white);
 }
 
+.nav_logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.nav_logo_img {
+  width: 36px;
+  height: 36px;
+}
+
 .nav_logo_text {
   font-size: 1.3rem;
   font-weight: 700;
   color: var(--accent);
   letter-spacing: 3px;
-  cursor: pointer;
-  flex-shrink: 0;
   text-transform: uppercase;
   transition: color 0.1s;
 }
 
-.nav_logo_text:hover {
+.nav_logo:hover .nav_logo_text {
   color: var(--yellow);
 }
 
@@ -78,10 +89,18 @@
     gap: 0;
   }
 
+  .nav_logo {
+    line-height: 56px;
+  }
+
+  .nav_logo_img {
+    width: 30px;
+    height: 30px;
+  }
+
   .nav_logo_text {
     font-size: 1rem;
     letter-spacing: 1px;
-    line-height: 56px;
   }
 
   .nav_hamburger {
