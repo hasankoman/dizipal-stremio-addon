@@ -189,7 +189,12 @@ app.get('/addon/stream/:type/:id/', async (req, res, next) => {
         if (id) {
             var video = await listVideo.GetVideos(id);
             if (video) {
-                const stream = { url: video.url };
+                // Encode the video URL and referer for proxying
+                var encodedUrl = Buffer.from(video.url).toString('base64url');
+                var encodedReferer = Buffer.from(video.referer || process.env.PROXY_URL + "/").toString('base64url');
+                var proxyUrl = `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encodedUrl}`;
+
+                const stream = { url: proxyUrl };
                 if (video.subtitles) {
                     myCache.set(id, video.subtitles);
                 }
@@ -287,6 +292,66 @@ function CheckSubtitleFoldersAndFiles() {
 
 }
 
+
+// Proxy endpoint for HLS streams
+app.get('/proxy/:referer/:url', async (req, res) => {
+    try {
+        var targetUrl = Buffer.from(req.params.url, 'base64url').toString();
+        var referer = Buffer.from(req.params.referer, 'base64url').toString();
+
+        var response = await axios({
+            url: targetUrl,
+            method: "GET",
+            headers: {
+                "Referer": referer,
+                "Origin": referer.replace(/\/$/, ''),
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            },
+            responseType: 'arraybuffer',
+            timeout: 30000,
+        });
+
+        var contentType = response.headers['content-type'] || 'application/octet-stream';
+        var body = response.data;
+
+        // If it's an m3u8 playlist, rewrite URLs to go through proxy
+        if (targetUrl.includes('.m3u8') || (contentType && contentType.includes('mpegurl'))) {
+            var text = body.toString('utf8');
+            var baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+            var encodedReferer = req.params.referer;
+
+            // Rewrite all non-comment lines (segment URLs) to go through proxy
+            text = text.replace(/^((?!#)\S+.*)$/gm, (match) => {
+                var line = match.trim();
+                if (!line) return match;
+                var fullUrl = line.startsWith('http') ? line : baseUrl + line;
+                var encoded = Buffer.from(fullUrl).toString('base64url');
+                return `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encoded}`;
+            });
+            // Also handle URI= in EXT-X-I-FRAME-STREAM-INF
+            text = text.replace(/URI="([^"]+)"/g, (match, uri) => {
+                var fullUrl = uri.startsWith('http') ? uri : baseUrl + uri;
+                var encoded = Buffer.from(fullUrl).toString('base64url');
+                return `URI="${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encoded}"`;
+            });
+
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.send(text);
+        }
+
+        // For .ts segments and other binary data
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        if (response.headers['content-length']) {
+            res.setHeader('Content-Length', response.headers['content-length']);
+        }
+        return res.send(Buffer.from(body));
+    } catch (error) {
+        console.log('Proxy error:', error.message);
+        res.status(500).send('Proxy error');
+    }
+});
 
 if (module.parent) {
     module.exports = app;

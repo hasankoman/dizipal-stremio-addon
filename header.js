@@ -5,22 +5,27 @@ const getUrlApi = require("./src/getUrlApi");
 try {
     getUrlApi.fetchWithUrl().then((value1) => {
         scrapeCookie.fetchWithCookies(value1 || process.env.PROXY_URL).then((value2) => {
-            if (value1) {
-                if (value2.data.length > 10) {
+            if (value2 && value2.data) {
+                if (value1) {
+                    if (value2.data.length > 10) {
+                        header.Cookie = value2.data;
+                        header.Origin = value1;
+                        header.Referer = value1;
+                    }
+                } else {
                     header.Cookie = value2.data;
-                    header.Origin = value1;
-                    header.Referer = value1;
+                    header.Origin = process.env.PROXY_URL;
+                    header.Referer = process.env.PROXY_URL;
                 }
-            }else{
-                header.Cookie = value2.data;
-                header.Origin = process.env.PROXY_URL;
-                header.Referer = process.env.PROXY_URL;
+            } else {
+                console.log("Cookie server not available, continuing without cookies");
             }
-        })
+        }).catch((err) => {
+            console.log("Cookie fetch failed:", err.message);
+        });
     });
 } catch (error) {
     console.log(error.message);
-    
 }
 
 

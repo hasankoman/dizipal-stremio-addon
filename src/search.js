@@ -5,99 +5,167 @@ const cheerio = require("cheerio");
 const Axios = require('axios')
 const { setupCache } = require("axios-cache-interceptor");
 
-
 const instance = Axios.create();
 const axios = setupCache(instance);
 
 
 async function SearchMovieAndSeries(name) {
     try {
-        var values;
-        var data = `query=${name}`
-        await axios({ ...sslfix, url: `${process.env.PROXY_URL}/api/search-autocomplete`, headers: header, method: "POST", data: data }).then((value) => {
-            if (value && value.status == 200 && value.statusText == "OK") {
-                if (value && typeof (value.data) !== "undefined") {
-                    values = value.data;
-                }
-            }
-        }).catch((error)=>{
-            console.log(error);
-        })
+        var response = await axios({
+            ...sslfix,
+            url: `${process.env.PROXY_URL}/ajax-search?q=${encodeURIComponent(name)}`,
+            headers: header,
+            method: "GET"
+        });
+
+        if (response && response.status == 200 && response.data && response.data.success) {
+            return response.data.results.map(item => {
+                var type = "movie";
+                if (item.type === "Dizi") type = "series";
+
+                // Extract the path from the full URL
+                var url = item.url;
+                try {
+                    url = new URL(item.url).pathname;
+                } catch(e) {}
+
+                return {
+                    title: item.title,
+                    type: type,
+                    url: url,
+                    poster: item.poster || "",
+                    genres: item.year ? String(item.year) : "",
+                    rating: item.rating || ""
+                };
+            });
+        }
     } catch (error) {
         if (error) console.log(error);
     }
-    return values;
+    return [];
 }
 
 async function SearchMetaMovieAndSeries(id, type) {
     try {
-
         var response = await axios({ ...sslfix, url: process.env.PROXY_URL + id, headers: header, method: "GET" });
-        if (response && response.status == 200 && response.statusText == "OK") {
+        if (response && response.status == 200) {
             var $ = cheerio.load(response.data);
+
             if (type == "series") {
-                var name = $("#container > div.popup-inner.auto > div.cover > h5").text().trim();
-                var background = $("#container > div.popup-inner.auto > div.cover").css("background-image").trim().replace(/url\(["']?([^"']*)["']?\)/, '$1');
-                var country = $("#container > div.popup-inner.auto > div.popup-summary > ul > li:nth-child(5) > div.value").text().includes("Yerli") ? "TR" : "US";
-                //genres
-                // var genres = [];
-                // var asd = $("#container > div.popup-inner.auto > div.popup-summary > ul > li:nth-child(5) > div.value").get();
-                var season = $("div.season-selectbox > select > option:last-child").attr("value").trim();
-                var imdb = $("#container > div.popup-inner.auto > div.popup-summary > ul > li:nth-child(1) > div.value").text().trim();
-                var releaseInfo = $("#container > div.popup-inner.auto > div.popup-summary > ul > li:nth-child(6) > div.value").text().trim();
-                var description = $("#container > div.popup-inner.auto > div.popup-summary > div > p").text().trim();
-            }else{
-                var name = $("#pre_content > div:nth-child(4) > div > span").text().trim();
-                var country = $("#container > div > div.popup-summary > ul > li:nth-child(5) > div.value").text().includes("Yerli") ? "TR" : "US";
-                var imdb = $("#container > div > div.popup-summary > ul > li:nth-child(1) > div.value").text().trim();
-                var releaseInfo = $("#container > div > div.popup-summary > ul > li:nth-child(4) > div.value").text().trim();
-                var description = $("#container > div > div.popup-summary > div > p").text().trim();
+                var name = $(".series-title").text().trim();
+                var background = "";
+                var heroStyle = $(".series-hero").attr("style") || "";
+                var bgMatch = heroStyle.match(/url\(['"]?([^'"\)]+)['"]?\)/);
+                if (bgMatch) background = bgMatch[1];
+
+                var description = $(".series-description").text().trim();
+                var seasonButtons = $(".season-btn");
+                var season = seasonButtons.length || 1;
+
+                // Try to get rating from JSON-LD
+                var imdb = "";
+                $('script[type="application/ld+json"]').each((i, el) => {
+                    try {
+                        var json = JSON.parse($(el).html());
+                        if (json.aggregateRating) {
+                            imdb = json.aggregateRating.ratingValue;
+                        }
+                        if (json.numberOfSeasons) {
+                            season = json.numberOfSeasons;
+                        }
+                    } catch(e) {}
+                });
+
+                var releaseInfo = "";
+                $(".detail-meta-item").each((i, el) => {
+                    var text = $(el).text();
+                    if (text.match(/\d{4}/)) {
+                        releaseInfo = text.match(/\d{4}/)[0];
+                    }
+                });
+
+            } else {
+                var name = $(".movie-title, .detail-title, h1").first().text().trim();
+                var background = "";
+                var heroStyle = $(".movie-hero, .detail-hero, .series-hero").attr("style") || "";
+                var bgMatch = heroStyle.match(/url\(['"]?([^'"\)]+)['"]?\)/);
+                if (bgMatch) background = bgMatch[1];
+
+                var description = $(".movie-description, .detail-description, .series-description").text().trim();
+                var season = 1;
+                var imdb = "";
+                var releaseInfo = "";
+
+                $('script[type="application/ld+json"]').each((i, el) => {
+                    try {
+                        var json = JSON.parse($(el).html());
+                        if (json.aggregateRating) {
+                            imdb = json.aggregateRating.ratingValue;
+                        }
+                        if (json.datePublished) {
+                            releaseInfo = json.datePublished.substring(0, 4);
+                        }
+                    } catch(e) {}
+                });
             }
-            var metaObj = {
+
+            return {
                 name: name,
                 background: background || "",
-                country: country || "JP",
+                country: "US",
                 genres: [],
-                season: season || 1,
+                season: season,
                 imdbRating: Number(imdb),
                 description: description,
                 releaseInfo: String(releaseInfo),
-            }
-            return metaObj;
+            };
         }
-
-
     } catch (error) {
         console.log(error);
     }
 }
 
-async function SearchDetailMovieAndSeries(id, type, episode) {
+async function SearchDetailMovieAndSeries(id, type, seasonNum) {
     try {
         if (type == "series") {
             var response = await axios({ ...sslfix, url: process.env.PROXY_URL + id, headers: header, method: "GET" });
-            if (response && response.status == 200 && response.statusText == "OK") {
-                var values = [{}];
+            if (response && response.status == 200) {
+                var values = [];
                 var $ = cheerio.load(response.data);
-                var data = $(`div.last-episodes.all-episodes > ul:nth-child(${episode})`).find(".episode-item");
-                data.each((i, element) => {
-                    i++;
-                    var id = $(element).find("a").attr("href");
-                    var title = $(element).find(`div:nth-child(${i}) > a > div:nth-child(3) > div.name`).text().trim();
-                    var thumbnail = $(element).find(`div:nth-child(${i}) > a > img`).attr("src");
-                    var episode = i;
-                    values.push({ id: id, title: title, thumbnail: thumbnail, episode: episode });
-                })
+
+                // Each season's episodes are in detail-episode-list
+                var episodeLists = $(".detail-episode-list");
+                var seasonList = episodeLists.eq(seasonNum - 1);
+
+                if (seasonList.length === 0) {
+                    // Fallback: try finding all episodes
+                    seasonList = episodeLists.first();
+                }
+
+                seasonList.find(".detail-episode-item-wrap").each((i, element) => {
+                    var link = $(element).find("a.detail-episode-item");
+                    var href = link.attr("href") || "";
+                    var title = $(element).find(".detail-episode-title").text().trim();
+                    var subtitle = $(element).find(".detail-episode-subtitle").text().trim();
+
+                    // Extract path from URL
+                    try {
+                        href = new URL(href).pathname;
+                    } catch(e) {}
+
+                    values.push({
+                        id: href,
+                        title: title || subtitle || `Bölüm ${i + 1}`,
+                        thumbnail: "",
+                        episode: i + 1
+                    });
+                });
+
                 return values;
             }
         } else {
-            var values = [{
-                id: id
-            }];
-            return values;
-
+            return [{ id: id }];
         }
-
     } catch (error) {
         console.log(error);
     }
