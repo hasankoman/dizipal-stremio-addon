@@ -22,7 +22,7 @@ function Row({ title, isHomepage, onSelect, onNavigate }) {
 
     return (
         <>
-            {sections.map((section, i) => (
+            {sections.filter(s => s.title !== "Son Bölümler").map((section, i) => (
                 <div className="row" key={i}>
                     <div className="row_header">
                         <h2>{section.title}</h2>

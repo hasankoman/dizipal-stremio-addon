@@ -11,7 +11,9 @@ function DetailModal({ content, onClose }) {
     const [playing, setPlaying] = useState(false);
     const [activeSeason, setActiveSeason] = useState(1);
     const [playerError, setPlayerError] = useState(null);
-    const [trailerLoading, setTrailerLoading] = useState(false);
+    const [trailerUrl, setTrailerUrl] = useState(null);
+    const [trailerLoading, setTrailerLoading] = useState(true);
+    const [tmdb, setTmdb] = useState(null);
     const videoRef = useRef(null);
     const hlsRef = useRef(null);
 
@@ -37,6 +39,22 @@ function DetailModal({ content, onClose }) {
             try {
                 const res = await axios.get(requests.detail(resolvedId));
                 setDetail(res.data);
+
+                // Fetch trailer from TMDB
+                const name = res.data?.meta?.name;
+                const contentType = resolvedId.includes("/dizi/") ? "series" : "movie";
+                if (name) {
+                    axios.get(requests.trailer(name, contentType))
+                        .then(r => {
+                            if (r.data.url) setTrailerUrl(r.data.url);
+                            if (r.data.tmdb) setTmdb(r.data.tmdb);
+                        })
+                        .catch(() => {})
+                        .finally(() => setTrailerLoading(false));
+                } else {
+                    setTrailerLoading(false);
+                }
+
                 if (parsedBolum) {
                     setActiveSeason(parsedBolum.season);
                     const eps = res.data?.episodes || [];
@@ -171,52 +189,6 @@ function DetailModal({ content, onClose }) {
         setPlayerError(null);
     }
 
-    async function handleTrailer() {
-        const name = detail?.meta?.name || content.title;
-        if (!name) return;
-
-        setTrailerLoading(true);
-        setPlayerError(null);
-        setStreamUrl(null);
-        setPlaying(false);
-
-        const query = name + " resmi fragman trailer";
-
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-            const res = await fetch(
-                `https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(query)}&filter=videos`,
-                { signal: controller.signal }
-            );
-            clearTimeout(timeoutId);
-
-            const data = await res.json();
-
-            if (data.items && data.items.length > 0) {
-                const videoUrl = data.items[0].url;
-                const videoId = videoUrl.split("v=")[1];
-                if (videoId) {
-                    setStreamUrl({ embed: `https://www.youtube.com/embed/${videoId}?autoplay=1` });
-                    setPlaying(true);
-                    setTrailerLoading(false);
-                    return;
-                }
-            }
-            window.open(
-                `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
-                "_blank"
-            );
-        } catch {
-            window.open(
-                `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
-                "_blank"
-            );
-        }
-        setTrailerLoading(false);
-    }
-
     const type = parsedBolum ? "series" : (content.type || (content.id?.includes("/dizi/") ? "series" : "movie"));
 
     return (
@@ -266,33 +238,122 @@ function DetailModal({ content, onClose }) {
                     </div>
                 ) : (
                     <>
-                        <div
-                            className="modal_banner"
-                            style={{
-                                backgroundImage: detail?.meta?.background
-                                    ? `url(${detail.meta.background})`
-                                    : `url(${content.poster})`,
-                            }}
-                        >
+                        <div className="modal_banner">
+                            {trailerUrl ? (
+                                <iframe
+                                    src={trailerUrl}
+                                    title="Fragman"
+                                    className="modal_banner_trailer"
+                                    allowFullScreen
+                                    allow="encrypted-media"
+                                    referrerPolicy="origin"
+                                />
+                            ) : (
+                                <div
+                                    className="modal_banner_bg"
+                                    style={{
+                                        backgroundImage: detail?.meta?.background
+                                            ? `url(${detail.meta.background})`
+                                            : `url(${content.poster})`,
+                                    }}
+                                />
+                            )}
                             <button className="modal_close" onClick={onClose} aria-label="Kapat">
                                 <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="square"><line x1="2" y1="2" x2="16" y2="16"/><line x1="16" y1="2" x2="2" y2="16"/></svg>
                             </button>
-                            <div className="modal_banner_overlay">
-                                <h1 className="modal_title">
-                                    {detail?.meta?.name || content.title}
-                                </h1>
+                            {!trailerUrl && (
+                                <div className="modal_banner_overlay">
+                                    <div className="modal_banner_meta">
+                                        {tmdb?.tmdbRating && (
+                                            <span className="modal_rating">TMDB {tmdb.tmdbRating}</span>
+                                        )}
+                                        {detail?.meta?.imdbRating > 0 && (
+                                            <span className="modal_rating">IMDB {detail.meta.imdbRating}</span>
+                                        )}
+                                        {(tmdb?.releaseDate || detail?.meta?.releaseInfo) && (
+                                            <span className="modal_year">{tmdb?.releaseDate ? tmdb.releaseDate.substring(0, 4) : detail.meta.releaseInfo}</span>
+                                        )}
+                                        {trailerLoading ? (
+                                            <span className="modal_trailer_loading"><span className="spinner" /></span>
+                                        ) : (
+                                            <a
+                                                className="modal_yt_btn"
+                                                href={`https://www.youtube.com/results?search_query=${encodeURIComponent((detail?.meta?.name || content.title) + " resmi fragman trailer")}`}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                            >
+                                                YouTube'da Fragman Bul
+                                            </a>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="modal_info">
+                            <h1 className="modal_title">
+                                {detail?.meta?.name || content.title}
+                            </h1>
+                            <div className="modal_meta_row">
+                                {tmdb?.tmdbRating && (
+                                    <span className="modal_rating">TMDB {tmdb.tmdbRating}</span>
+                                )}
                                 {detail?.meta?.imdbRating > 0 && (
                                     <span className="modal_rating">IMDB {detail.meta.imdbRating}</span>
                                 )}
-                                {detail?.meta?.releaseInfo && (
+                                {tmdb?.releaseDate && (
+                                    <span className="modal_year">{tmdb.releaseDate.substring(0, 4)}</span>
+                                )}
+                                {!tmdb?.releaseDate && detail?.meta?.releaseInfo && (
                                     <span className="modal_year">{detail.meta.releaseInfo}</span>
                                 )}
+                                {tmdb?.runtime && (
+                                    <span className="modal_runtime">{Math.floor(tmdb.runtime / 60)}s {tmdb.runtime % 60}dk</span>
+                                )}
+                                {tmdb?.seasonCount && (
+                                    <span className="modal_runtime">{tmdb.seasonCount} Sezon</span>
+                                )}
+                                {tmdb?.status && (
+                                    <span className="modal_status">{tmdb.status}</span>
+                                )}
                             </div>
+                            {tmdb?.genres?.length > 0 && (
+                                <div className="modal_genres">
+                                    {tmdb.genres.map((g, i) => (
+                                        <span key={i} className="modal_genre_tag">{g}</span>
+                                    ))}
+                                </div>
+                            )}
+                            {(tmdb?.overview || detail?.meta?.description) && (
+                                <p className="modal_description">
+                                    {tmdb?.overview || detail.meta.description}
+                                </p>
+                            )}
+                            {tmdb?.cast?.length > 0 && (
+                                <div className="modal_cast_section">
+                                    <span className="modal_cast_label">Oyuncular</span>
+                                    <div className="modal_cast_list">
+                                        {tmdb.cast.map((c, i) => (
+                                            <div key={i} className="modal_cast_card">
+                                                {c.photo ? (
+                                                    <img className="modal_cast_photo" src={c.photo} alt={c.name} />
+                                                ) : (
+                                                    <div className="modal_cast_photo modal_cast_no_photo" />
+                                                )}
+                                                <span className="modal_cast_name">{c.name}</span>
+                                                {c.character && <span className="modal_cast_char">{c.character}</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {tmdb?.director?.length > 0 && (
+                                <div className="modal_director">
+                                    <span className="modal_cast_label">{type === "movie" ? "Y\u00f6netmen:" : "Yarat\u0131c\u0131:"}</span>
+                                    <span className="modal_cast_names">{tmdb.director.join(", ")}</span>
+                                </div>
+                            )}
                         </div>
-
-                        {detail?.meta?.description && (
-                            <p className="modal_description">{detail.meta.description}</p>
-                        )}
 
                         {loading ? (
                             <div className="modal_loading">Yukleniyor...</div>
@@ -301,27 +362,13 @@ function DetailModal({ content, onClose }) {
                                 <button
                                     className="modal_play_main"
                                     onClick={() => handlePlay(content.id)}
-                                    disabled={streamLoading || trailerLoading}
+                                    disabled={streamLoading}
                                 >
                                     {streamLoading ? "Yukleniyor..." : "Izle"}
-                                </button>
-                                <button
-                                    className="modal_trailer_btn"
-                                    onClick={handleTrailer}
-                                    disabled={trailerLoading || streamLoading}
-                                >
-                                    {trailerLoading ? "Yukleniyor..." : "Fragman Izle"}
                                 </button>
                             </div>
                         ) : (
                             <div className="modal_episodes">
-                                <button
-                                    className="modal_trailer_btn"
-                                    onClick={handleTrailer}
-                                    disabled={trailerLoading || streamLoading}
-                                >
-                                    {trailerLoading ? "Yukleniyor..." : "Fragman Izle"}
-                                </button>
                                 {detail?.episodes?.length > 0 ? (
                                     (() => {
                                         const seasons = {};

@@ -107,11 +107,13 @@ app.get("/api/list/:type", async (req, res) => {
 
         var page = parseInt(req.query.page) || 1;
         var kategori = req.query.kategori || "";
+        // Support comma-separated categories from frontend
+        var kategoriList = kategori ? kategori.split(",").filter(Boolean) : [];
         var yil = req.query.yil || "";
         var durum = req.query.durum || "";
         var siralama = req.query.siralama || "newest";
 
-        var cacheKey = `api_list_${type}_${page}_${kategori}_${yil}_${durum}_${siralama}`;
+        var cacheKey = `api_list_${type}_${page}_${kategoriList.join(",")}_${yil}_${durum}_${siralama}`;
         var cached = myCache.get(cacheKey);
         if (cached) return respond(res, cached);
 
@@ -120,7 +122,7 @@ app.get("/api/list/:type", async (req, res) => {
 
         var params = new URLSearchParams();
         if (page > 1) params.set("page", page);
-        if (kategori) params.set("kategori", kategori);
+        kategoriList.forEach(k => params.append("kategori", k));
         if (yil) params.set("yil", yil);
         if (durum) params.set("durum", durum);
         if (siralama && siralama !== "newest") params.set("siralama", siralama);
@@ -320,6 +322,88 @@ app.get("/api/detail/:path(*)", async (req, res) => {
     } catch (error) {
         console.log(error);
         return respond(res, { meta: null, episodes: [] });
+    }
+});
+
+app.get("/api/trailer", async (req, res) => {
+    try {
+        const name = req.query.name;
+        const contentType = req.query.type === "series" ? "tv" : "movie";
+        if (!name) return respond(res, { url: null });
+
+        var cached = myCache.get("trailer_" + contentType + "_" + name);
+        if (cached) return respond(res, cached);
+
+        const tmdbHeaders = {
+            Authorization: `Bearer ${process.env.TMDB_TOKEN}`,
+            "Content-Type": "application/json"
+        };
+
+        // 1. Search on TMDB
+        const searchRes = await axios.get(
+            `https://api.themoviedb.org/3/search/${contentType}?query=${encodeURIComponent(name)}&language=tr-TR`,
+            { headers: tmdbHeaders, cache: false }
+        );
+
+        if (!searchRes.data.results || searchRes.data.results.length === 0) {
+            return respond(res, { url: null });
+        }
+
+        const tmdbId = searchRes.data.results[0].id;
+
+        // 2. Get details + credits + videos + external_ids in one call
+        const detailRes = await axios.get(
+            `https://api.themoviedb.org/3/${contentType}/${tmdbId}?language=tr-TR&append_to_response=credits,videos,external_ids`,
+            { headers: tmdbHeaders, cache: false }
+        );
+        const d = detailRes.data;
+
+        // 3. Find trailer (Turkish first, then English fallback)
+        let trailer = d.videos?.results?.find(v => v.site === "YouTube" && v.type === "Trailer");
+        if (!trailer) trailer = d.videos?.results?.find(v => v.site === "YouTube");
+
+        if (!trailer) {
+            const videosResEn = await axios.get(
+                `https://api.themoviedb.org/3/${contentType}/${tmdbId}/videos?language=en-US`,
+                { headers: tmdbHeaders, cache: false }
+            );
+            trailer = videosResEn.data.results?.find(v => v.site === "YouTube" && v.type === "Trailer");
+            if (!trailer) trailer = videosResEn.data.results?.find(v => v.site === "YouTube");
+        }
+
+        // 4. Build result
+        const cast = (d.credits?.cast || []).slice(0, 8).map(c => ({
+            name: c.name,
+            character: c.character || null,
+            photo: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
+        }));
+        const directors = (d.credits?.crew || []).filter(c => c.job === "Director").map(c => c.name);
+        const creators = (d.created_by || []).map(c => c.name);
+
+        const result = {
+            url: trailer ? `https://www.youtube.com/embed/${trailer.key}` : null,
+            tmdb: {
+                genres: (d.genres || []).map(g => g.name),
+                cast: cast,
+                director: contentType === "movie" ? directors : creators,
+                runtime: d.runtime || null,
+                seasonCount: d.number_of_seasons || null,
+                episodeCount: d.number_of_episodes || null,
+                tmdbRating: d.vote_average ? Math.round(d.vote_average * 10) / 10 : null,
+                overview: d.overview || null,
+                poster: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : null,
+                backdrop: d.backdrop_path ? `https://image.tmdb.org/t/p/w1280${d.backdrop_path}` : null,
+                releaseDate: d.release_date || d.first_air_date || null,
+                originalTitle: d.original_title || d.original_name || null,
+                status: d.status || null,
+            }
+        };
+
+        myCache.set("trailer_" + contentType + "_" + name, result, 24 * 60 * 60);
+        return respond(res, result);
+    } catch (error) {
+        console.log(error);
+        return respond(res, { url: null });
     }
 });
 
