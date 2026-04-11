@@ -3,6 +3,7 @@ import axios from "./axios";
 import requests from "./requests";
 import "./DetailModal.css";
 import { getWatchProgress, saveWatchProgress, formatTime } from "./watchHistory";
+import DownloadPage from "./DownloadPage";
 
 function DetailModal({ content, onClose }) {
     const [detail, setDetail] = useState(null);
@@ -18,6 +19,7 @@ function DetailModal({ content, onClose }) {
     const [playingEpisodeId, setPlayingEpisodeId] = useState(null);
     const [showNextPrompt, setShowNextPrompt] = useState(false);
     const [nextCountdown, setNextCountdown] = useState(0);
+    const [downloadInfo, setDownloadInfo] = useState(null);
     const videoRef = useRef(null);
     const hlsRef = useRef(null);
     const playingPathRef = useRef(null);
@@ -374,9 +376,8 @@ function DetailModal({ content, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [nextCountdown]);
 
-    function handleDownload(path) {
-        const backendUrl = process.env.REACT_APP_BACKEND_URL || "";
-        window.open(backendUrl + requests.download(path), "_blank");
+    function handleDownload(path, title) {
+        setDownloadInfo({ path, title: title || contentInfoRef.current.title });
     }
 
     const movieProgress = type === "movie" ? getWatchProgress(content.id) : null;
@@ -385,6 +386,14 @@ function DetailModal({ content, onClose }) {
         (movieProgress.currentTime / movieProgress.duration) < 0.95;
 
     return (
+        <>
+        {downloadInfo && (
+            <DownloadPage
+                path={downloadInfo.path}
+                contentTitle={downloadInfo.title}
+                onClose={() => setDownloadInfo(null)}
+            />
+        )}
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>
                 {playing && streamUrl ? (
@@ -655,7 +664,7 @@ function DetailModal({ content, onClose }) {
                                 </button>
                                 <button
                                     className="modal_download_btn"
-                                    onClick={() => handleDownload(content.id)}
+                                    onClick={() => handleDownload(content.id, detail?.meta?.name || content.title)}
                                     disabled={streamLoading}
                                 >
                                     {"Indir"}
@@ -704,7 +713,7 @@ function DetailModal({ content, onClose }) {
                                                                 </button>
                                                                 <button
                                                                     className="modal_ep_download"
-                                                                    onClick={() => handleDownload(ep.id)}
+                                                                    onClick={() => handleDownload(ep.id, `${detail?.meta?.name || content.title} S${ep.season}E${ep.episode}`)}
                                                                     disabled={false}
                                                                     aria-label="Indir"
                                                                 >
@@ -726,6 +735,7 @@ function DetailModal({ content, onClose }) {
                 )}
             </div>
         </div>
+        </>
     );
 }
 

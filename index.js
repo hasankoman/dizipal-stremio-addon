@@ -480,6 +480,162 @@ app.get("/api/trailer", async (req, res) => {
 const { spawn } = require('child_process');
 const os = require('os');
 
+// Track active downloads
+const activeDownloads = new Map();
+
+// SSE endpoint for download progress
+app.get("/api/download-progress/:path(*)", async (req, res) => {
+    var contentPath = "/" + req.params.path;
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.flushHeaders();
+
+    function sendEvent(data) {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+
+    sendEvent({ status: "preparing" });
+
+    try {
+        var video = await listVideo.GetVideos(contentPath);
+
+        if (!video || !video.url) {
+            sendEvent({ status: "error", message: "Video bulunamadi" });
+            res.end();
+            return;
+        }
+
+        var filename = contentPath.replace(/\//g, "_").replace(/^_/, "") + ".mp4";
+        var referer = video.referer || process.env.PROXY_URL + "/";
+        var tmpFile = path.join(os.tmpdir(), "dl_" + Date.now() + ".mp4");
+
+        activeDownloads.set(contentPath, { tmpFile, filename, status: "downloading" });
+
+        var ytdlp = spawn("yt-dlp", [
+            "--referer", referer,
+            "--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "-o", tmpFile,
+            "--no-part",
+            "--newline",
+            "--concurrent-fragments", "16",
+            "--progress-template", "%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s",
+            video.url
+        ]);
+
+        var aborted = false;
+        var maxProgress = 0;
+
+        req.on("close", () => {
+            // Eğer indirme tamamlandıysa silme, dosyayı aktarmak için lazım
+            var download = activeDownloads.get(contentPath);
+            if (download && download.status === "completed") {
+                return;
+            }
+            aborted = true;
+            ytdlp.kill("SIGTERM");
+            fs.unlink(tmpFile, () => {});
+            activeDownloads.delete(contentPath);
+        });
+
+        ytdlp.stdout.on("data", (data) => {
+            if (aborted) return;
+            var lines = data.toString().split("\n");
+            for (var line of lines) {
+                line = line.trim();
+                if (!line) continue;
+
+                var parts = line.split("|");
+                if (parts.length >= 1) {
+                    var percentStr = parts[0].replace("%", "").trim();
+                    var progress = parseFloat(percentStr) || 0;
+                    var speed = parts[1] || null;
+                    var eta = parts[2] || null;
+                    var totalSize = parts[3] || null;
+
+                    // Progress sadece artabilir, birleştirme aşamasında sıfırlanmasın
+                    if (progress > maxProgress) {
+                        maxProgress = progress;
+                    }
+
+                    sendEvent({
+                        status: "downloading",
+                        progress: Math.min(maxProgress, 99),
+                        speed: speed,
+                        eta: eta,
+                        fileSize: totalSize
+                    });
+                }
+            }
+        });
+
+        ytdlp.stderr.on("data", (data) => {
+            console.log("yt-dlp stderr:", data.toString());
+        });
+
+        ytdlp.on("close", (code) => {
+            if (aborted) return;
+            if (code === 0 && fs.existsSync(tmpFile)) {
+                var stat = fs.statSync(tmpFile);
+                activeDownloads.set(contentPath, { tmpFile, filename, status: "completed", size: stat.size });
+                sendEvent({ status: "completed", fileSize: stat.size });
+            } else {
+                activeDownloads.delete(contentPath);
+                sendEvent({ status: "error", message: "Indirme basarisiz (kod: " + code + ")" });
+                fs.unlink(tmpFile, () => {});
+            }
+            res.end();
+        });
+
+        ytdlp.on("error", (err) => {
+            console.log("yt-dlp error:", err);
+            activeDownloads.delete(contentPath);
+            sendEvent({ status: "error", message: "yt-dlp hatasi" });
+            res.end();
+        });
+
+    } catch (error) {
+        console.log(error);
+        sendEvent({ status: "error", message: "Bir hata olustu" });
+        res.end();
+    }
+});
+
+// Download completed file
+app.get("/api/download-file/:path(*)", async (req, res) => {
+    var contentPath = "/" + req.params.path;
+    var download = activeDownloads.get(contentPath);
+
+    if (!download || download.status !== "completed") {
+        return res.status(404).json({ error: "Dosya hazir degil" });
+    }
+
+    var { tmpFile, filename, size } = download;
+
+    if (!fs.existsSync(tmpFile)) {
+        activeDownloads.delete(contentPath);
+        return res.status(404).json({ error: "Dosya bulunamadi" });
+    }
+
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Length", size);
+
+    var stream = fs.createReadStream(tmpFile);
+    stream.pipe(res);
+    stream.on("end", () => {
+        fs.unlink(tmpFile, () => {});
+        activeDownloads.delete(contentPath);
+    });
+    stream.on("error", () => {
+        fs.unlink(tmpFile, () => {});
+        activeDownloads.delete(contentPath);
+        res.end();
+    });
+});
+
 app.get("/api/download/:path(*)", async (req, res) => {
     try {
         var contentPath = "/" + req.params.path;
@@ -502,6 +658,7 @@ app.get("/api/download/:path(*)", async (req, res) => {
             "-o", tmpFile,
             "--no-part",
             "--quiet",
+            "--concurrent-fragments", "16",
             video.url
         ]);
 
