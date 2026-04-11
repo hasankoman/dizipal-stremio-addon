@@ -382,6 +382,70 @@
   flex-direction: column;
 }
 
+/* ── EPISODE NAV (prev/next) ── */
+.modal_ep_nav {
+  display: flex;
+  align-items: stretch;
+  border-top: var(--border-width) solid var(--border-muted);
+}
+
+.modal_ep_nav_btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transition: color 0.1s, background 0.1s;
+}
+
+.modal_ep_nav_btn:hover:not(:disabled) {
+  color: var(--white);
+  background: var(--card);
+}
+
+.modal_ep_nav_btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.modal_ep_nav_info {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 14px 20px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--white);
+  background: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  border-left: var(--border-width) solid var(--white);
+  border-right: var(--border-width) solid var(--white);
+}
+
+@media (max-width: 600px) {
+  .modal_ep_nav_btn {
+    padding: 10px 8px;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+  .modal_ep_nav_info {
+    padding: 10px 12px;
+    font-size: 11px;
+  }
+}
+
 .modal_alt_players {
   display: flex;
   gap: 0;
@@ -591,6 +655,151 @@
 .modal_back_btn:hover {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+/* ── NEXT EPISODE PROMPT ── */
+.modal_next_overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.modal_next_box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 40px;
+  border: var(--border-width) solid var(--white);
+  background: var(--bg);
+  box-shadow: 6px 6px 0px var(--accent);
+  max-width: 380px;
+  width: 90%;
+}
+
+.modal_next_label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 4px;
+}
+
+.modal_next_ep {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--white);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.modal_next_title {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal_next_countdown_bar {
+  width: 100%;
+  height: 4px;
+  background: var(--border-muted);
+  margin: 6px 0;
+}
+
+.modal_next_countdown_fill {
+  height: 100%;
+  background: var(--accent);
+  animation: nextCountdown 10s linear forwards;
+}
+
+@keyframes nextCountdown {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.modal_next_actions {
+  display: flex;
+  gap: 0;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.modal_next_play {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--accent);
+  color: var(--white);
+  border: var(--border-width) solid var(--white);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transition: background 0.1s;
+}
+
+.modal_next_play:hover {
+  background: var(--accent-hover);
+}
+
+.modal_next_exit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 20px;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: var(--border-width) solid var(--white);
+  border-left: none;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transition: color 0.1s, background 0.1s;
+}
+
+.modal_next_exit:hover {
+  color: var(--white);
+  background: var(--card);
+}
+
+@media (max-width: 600px) {
+  .modal_next_box {
+    padding: 24px 20px;
+  }
+  .modal_next_ep {
+    font-size: 15px;
+  }
+  .modal_next_play {
+    font-size: 12px;
+    padding: 12px 12px;
+    letter-spacing: 1px;
+  }
+  .modal_next_exit {
+    padding: 12px 14px;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
 }
 
 .modal_player_error {

@@ -43,15 +43,34 @@ export function removeWatchProgress(contentId) {
 
 export function getContinueWatchingItems(limit = 20) {
     const history = getWatchHistory();
-    return Object.entries(history)
+    const filtered = Object.entries(history)
         .filter(([, data]) => {
-            if (!data.duration || !isFinite(data.duration) || !isFinite(data.currentTime) || !data.title) return false;
+            if (!data.title) return false;
+            if (data.nextUp && (!data.duration || data.currentTime === 0)) return true;
+            if (!data.duration || !isFinite(data.duration) || !isFinite(data.currentTime)) return false;
             const progress = data.currentTime / data.duration;
             return progress > 0.02 && progress < 0.95;
         })
-        .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
-        .slice(0, limit)
         .map(([id, data]) => ({ streamPath: id, ...data }));
+
+    // Deduplicate by parentId: keep the furthest-ahead episode per series
+    const deduped = {};
+    for (const item of filtered) {
+        const key = item.parentId || item.streamPath;
+        if (!deduped[key]) {
+            deduped[key] = item;
+        } else {
+            const existingPos = (deduped[key].season || 0) * 10000 + (deduped[key].episode || 0);
+            const newPos = (item.season || 0) * 10000 + (item.episode || 0);
+            if (newPos > existingPos) {
+                deduped[key] = item;
+            }
+        }
+    }
+
+    return Object.values(deduped)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, limit);
 }
 
 export function formatTime(seconds) {

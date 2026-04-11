@@ -15,11 +15,15 @@ function DetailModal({ content, onClose }) {
     const [trailerUrl, setTrailerUrl] = useState(null);
     const [trailerLoading, setTrailerLoading] = useState(true);
     const [tmdb, setTmdb] = useState(null);
+    const [playingEpisodeId, setPlayingEpisodeId] = useState(null);
+    const [showNextPrompt, setShowNextPrompt] = useState(false);
+    const [nextCountdown, setNextCountdown] = useState(0);
     const videoRef = useRef(null);
     const hlsRef = useRef(null);
     const playingPathRef = useRef(null);
     const contentInfoRef = useRef({});
     const cleanupListenersRef = useRef(null);
+    const nextEpisodeIdRef = useRef(null);
 
     useEffect(() => {
         document.body.style.overflow = "hidden";
@@ -143,6 +147,8 @@ function DetailModal({ content, onClose }) {
                         ...contentInfoRef.current,
                     });
                 }
+                const nextId = nextEpisodeIdRef.current;
+                if (nextId) setShowNextPrompt(true);
             };
             video.addEventListener('timeupdate', onTimeUpdate);
             video.addEventListener('pause', onPause);
@@ -246,7 +252,9 @@ function DetailModal({ content, onClose }) {
     }
 
     async function handlePlay(path) {
+        setShowNextPrompt(false);
         playingPathRef.current = path;
+        setPlayingEpisodeId(path);
         videoRef.current = null;
         if (cleanupListenersRef.current) {
             cleanupListenersRef.current();
@@ -256,6 +264,7 @@ function DetailModal({ content, onClose }) {
             const ep = detail.episodes.find(e => e.id === path);
             if (ep) {
                 contentInfoRef.current = { ...contentInfoRef.current, season: ep.season, episode: ep.episode };
+                setActiveSeason(ep.season);
             } else {
                 const { season, episode, ...rest } = contentInfoRef.current;
                 contentInfoRef.current = rest;
@@ -288,6 +297,7 @@ function DetailModal({ content, onClose }) {
     }
 
     function handleStopPlaying() {
+        setShowNextPrompt(false);
         if (cleanupListenersRef.current) {
             cleanupListenersRef.current();
             cleanupListenersRef.current = null;
@@ -307,12 +317,55 @@ function DetailModal({ content, onClose }) {
             hlsRef.current = null;
         }
         playingPathRef.current = null;
+        setPlayingEpisodeId(null);
         setPlaying(false);
         setStreamUrl(null);
         setPlayerError(null);
     }
 
     const type = parsedBolum ? "series" : (content.type || (content.id?.includes("/dizi/") ? "series" : "movie"));
+
+    const currentEpisodeNav = useMemo(() => {
+        if (!playingEpisodeId || !detail?.episodes?.length) return { prev: null, next: null, current: null };
+        const allEpisodes = [...detail.episodes].sort((a, b) => {
+            if ((a.season || 1) !== (b.season || 1)) return (a.season || 1) - (b.season || 1);
+            return (a.episode || 0) - (b.episode || 0);
+        });
+        const idx = allEpisodes.findIndex(ep => ep.id === playingEpisodeId);
+        if (idx === -1) return { prev: null, next: null, current: null };
+        return {
+            prev: idx > 0 ? allEpisodes[idx - 1] : null,
+            next: idx < allEpisodes.length - 1 ? allEpisodes[idx + 1] : null,
+            current: allEpisodes[idx],
+        };
+    }, [playingEpisodeId, detail]);
+
+    useEffect(() => {
+        nextEpisodeIdRef.current = currentEpisodeNav.next?.id || null;
+    }, [currentEpisodeNav]);
+
+    // Countdown timer for next episode prompt
+    useEffect(() => {
+        if (!showNextPrompt) return;
+        setNextCountdown(10);
+        const interval = setInterval(() => {
+            setNextCountdown(c => {
+                if (c <= 1) { clearInterval(interval); return 0; }
+                return c - 1;
+            });
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [showNextPrompt]);
+
+    // Auto-play when countdown expires
+    useEffect(() => {
+        if (nextCountdown === 0 && showNextPrompt && currentEpisodeNav.next) {
+            setShowNextPrompt(false);
+            handlePlay(currentEpisodeNav.next.id);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nextCountdown]);
+
     const movieProgress = type === "movie" ? getWatchProgress(content.id) : null;
     const movieHasProgress = movieProgress && movieProgress.duration > 0 &&
         (movieProgress.currentTime / movieProgress.duration) > 0.02 &&
@@ -348,7 +401,78 @@ function DetailModal({ content, onClose }) {
                             <button className="modal_back_btn" onClick={handleStopPlaying} aria-label="Geri">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="square"><line x1="14" y1="8" x2="2" y2="8"/><polyline points="7,2 2,8 7,14"/></svg>
                             </button>
+                            {showNextPrompt && currentEpisodeNav.next && (
+                                <div className="modal_next_overlay">
+                                    <div className="modal_next_box">
+                                        <span className="modal_next_label">Sonraki Bolum</span>
+                                        <span className="modal_next_ep">
+                                            {currentEpisodeNav.next.season}. Sezon {currentEpisodeNav.next.episode}. Bolum
+                                        </span>
+                                        {currentEpisodeNav.next.title && (
+                                            <span className="modal_next_title">{currentEpisodeNav.next.title}</span>
+                                        )}
+                                        <div className="modal_next_countdown_bar">
+                                            <div className="modal_next_countdown_fill" key={showNextPrompt} />
+                                        </div>
+                                        <div className="modal_next_actions">
+                                            <button
+                                                className="modal_next_play"
+                                                onClick={() => { setShowNextPrompt(false); handlePlay(currentEpisodeNav.next.id); }}
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><polygon points="2,0 14,7 2,14"/></svg>
+                                                Sonraki ({nextCountdown})
+                                            </button>
+                                            <button
+                                                className="modal_next_exit"
+                                                onClick={() => {
+                                                    const next = currentEpisodeNav.next;
+                                                    if (next) {
+                                                        saveWatchProgress(next.id, {
+                                                            currentTime: 0,
+                                                            duration: 0,
+                                                            nextUp: true,
+                                                            title: contentInfoRef.current.title,
+                                                            poster: contentInfoRef.current.poster,
+                                                            parentId: contentInfoRef.current.parentId,
+                                                            season: next.season,
+                                                            episode: next.episode,
+                                                        });
+                                                    }
+                                                    setShowNextPrompt(false);
+                                                    handleStopPlaying();
+                                                }}
+                                            >
+                                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>
+                                                Cik
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
+                        {type === "series" && currentEpisodeNav.current && (
+                            <div className="modal_ep_nav">
+                                <button
+                                    className="modal_ep_nav_btn"
+                                    onClick={() => handlePlay(currentEpisodeNav.prev.id)}
+                                    disabled={!currentEpisodeNav.prev || streamLoading}
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><line x1="12" y1="7" x2="2" y2="7"/><polyline points="6,2 2,7 6,12"/></svg>
+                                    Onceki
+                                </button>
+                                <span className="modal_ep_nav_info">
+                                    {currentEpisodeNav.current.season}. Sezon {currentEpisodeNav.current.episode}. Bolum
+                                </span>
+                                <button
+                                    className="modal_ep_nav_btn"
+                                    onClick={() => handlePlay(currentEpisodeNav.next.id)}
+                                    disabled={!currentEpisodeNav.next || streamLoading}
+                                >
+                                    Sonraki
+                                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><line x1="2" y1="7" x2="12" y2="7"/><polyline points="8,2 12,7 8,12"/></svg>
+                                </button>
+                            </div>
+                        )}
                         {!streamUrl.embed && (
                             <div className="modal_alt_players">
                                 {streamUrl.vlc && (
