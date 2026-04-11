@@ -11,7 +11,7 @@ function ListPage({ type, onSelect, onBack }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const [filterOptions, setFilterOptions] = useState({});
 
-    const [kategori, setKategori] = useState([]);
+    const [kategori, setKategori] = useState("");
     const [yil, setYil] = useState("");
     const [durum, setDurum] = useState("");
     const [siralama, setSiralama] = useState("newest");
@@ -26,7 +26,7 @@ function ListPage({ type, onSelect, onBack }) {
 
         try {
             const params = { page: pageNum, siralama };
-            if (kategori.length > 0) params.kategori = kategori.join(",");
+            if (kategori) params.kategori = kategori;
             if (yil) params.yil = yil;
             if (isDizi && durum) params.durum = durum;
 
@@ -65,14 +65,14 @@ function ListPage({ type, onSelect, onBack }) {
     }
 
     function handleFilterReset() {
-        setKategori([]);
+        setKategori("");
         setYil("");
         setDurum("");
         setSiralama("newest");
         setImdbMin("");
     }
 
-    const hasActiveFilter = kategori.length > 0 || yil || durum || siralama !== "newest" || imdbMin;
+    const hasActiveFilter = kategori || yil || durum || siralama !== "newest" || imdbMin;
 
     const filteredItems = imdbMin
         ? items.filter(item => {
@@ -90,25 +90,17 @@ function ListPage({ type, onSelect, onBack }) {
                 <h1 className="listpage_title">{title}</h1>
             </div>
 
-            {filterOptions.kategori && filterOptions.kategori.length > 1 && (
-                <div className="listpage_kategori_tags">
-                    {filterOptions.kategori.filter(o => o.value).map((o, i) => (
-                        <button
-                            key={i}
-                            className={`listpage_kategori_tag ${kategori.includes(o.value) ? "active" : ""}`}
-                            onClick={() => setKategori(prev =>
-                                prev.includes(o.value)
-                                    ? prev.filter(k => k !== o.value)
-                                    : [...prev, o.value]
-                            )}
-                        >
-                            {o.label}
-                        </button>
-                    ))}
-                </div>
-            )}
-
             <div className="listpage_filters">
+                <select value={kategori} onChange={e => setKategori(e.target.value)}>
+                    {filterOptions.kategori ? (
+                        filterOptions.kategori.map((o, i) => (
+                            <option key={i} value={o.value}>{o.label}</option>
+                        ))
+                    ) : (
+                        <option value="">Tum Kategoriler</option>
+                    )}
+                </select>
+
                 <select value={yil} onChange={e => setYil(e.target.value)}>
                     {filterOptions.yil ? (
                         filterOptions.yil.map((o, i) => (

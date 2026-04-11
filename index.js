@@ -107,13 +107,11 @@ app.get("/api/list/:type", async (req, res) => {
 
         var page = parseInt(req.query.page) || 1;
         var kategori = req.query.kategori || "";
-        // Support comma-separated categories from frontend
-        var kategoriList = kategori ? kategori.split(",").filter(Boolean) : [];
         var yil = req.query.yil || "";
         var durum = req.query.durum || "";
         var siralama = req.query.siralama || "newest";
 
-        var cacheKey = `api_list_${type}_${page}_${kategoriList.join(",")}_${yil}_${durum}_${siralama}`;
+        var cacheKey = `api_list_${type}_${page}_${kategori}_${yil}_${durum}_${siralama}`;
         var cached = myCache.get(cacheKey);
         if (cached) return respond(res, cached);
 
@@ -122,7 +120,7 @@ app.get("/api/list/:type", async (req, res) => {
 
         var params = new URLSearchParams();
         if (page > 1) params.set("page", page);
-        kategoriList.forEach(k => params.append("kategori", k));
+        if (kategori) params.set("kategori", kategori);
         if (yil) params.set("yil", yil);
         if (durum) params.set("durum", durum);
         if (siralama && siralama !== "newest") params.set("siralama", siralama);
