@@ -5,6 +5,7 @@ import SearchBar from "./SearchBar";
 import SearchResults from "./SearchResults";
 import DetailModal from "./DetailModal";
 import ListPage from "./ListPage";
+import ContinueWatchingRow from "./ContinueWatchingRow";
 import "./App.css";
 
 function App() {
@@ -12,6 +13,7 @@ function App() {
     const [selectedContent, setSelectedContent] = useState(null);
     const [listPage, setListPage] = useState(null); // "diziler" or "filmler"
     const [menuOpen, setMenuOpen] = useState(false);
+    const [cwRefresh, setCwRefresh] = useState(0);
 
     function handleBack() {
         setListPage(null);
@@ -41,7 +43,7 @@ function App() {
             {selectedContent && (
                 <DetailModal
                     content={selectedContent}
-                    onClose={() => setSelectedContent(null)}
+                    onClose={() => { setSelectedContent(null); setCwRefresh(c => c + 1); }}
                 />
             )}
 
@@ -60,6 +62,7 @@ function App() {
             ) : (
                 <>
                     <Banner onSelect={setSelectedContent} />
+                    <ContinueWatchingRow onSelect={setSelectedContent} refreshKey={cwRefresh} />
                     <Row title="Kesfet" isHomepage onSelect={setSelectedContent} onNavigate={setListPage} />
                 </>
             )}

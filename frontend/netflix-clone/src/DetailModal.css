@@ -332,6 +332,9 @@
   letter-spacing: 4px;
   box-shadow: var(--shadow);
   transition: box-shadow 0.1s, background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .modal_play_main:hover {
@@ -478,6 +481,8 @@
   text-align: left;
   font-family: var(--font);
   transition: background 0.1s, border-color 0.1s;
+  position: relative;
+  overflow: hidden;
 }
 
 .modal_episode_btn:first-child {
@@ -517,6 +522,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   letter-spacing: 0.5px;
+}
+
+.ep_progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.ep_progress_fill {
+  height: 100%;
+  background: var(--accent);
 }
 
 /* ── LOADING / EMPTY ── */

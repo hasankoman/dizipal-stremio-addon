@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import axios from "./axios";
 import requests from "./requests";
 import "./DetailModal.css";
+import { getWatchProgress, saveWatchProgress, formatTime } from "./watchHistory";
 
 function DetailModal({ content, onClose }) {
     const [detail, setDetail] = useState(null);
@@ -16,6 +17,9 @@ function DetailModal({ content, onClose }) {
     const [tmdb, setTmdb] = useState(null);
     const videoRef = useRef(null);
     const hlsRef = useRef(null);
+    const playingPathRef = useRef(null);
+    const contentInfoRef = useRef({});
+    const cleanupListenersRef = useRef(null);
 
     useEffect(() => {
         document.body.style.overflow = "hidden";
@@ -32,6 +36,15 @@ function DetailModal({ content, onClose }) {
     }, [content.id]);
 
     const resolvedId = parsedBolum ? parsedBolum.diziId : content.id;
+
+    useEffect(() => {
+        contentInfoRef.current = {
+            ...contentInfoRef.current,
+            title: detail?.meta?.name || content.title,
+            poster: content.poster,
+            parentId: resolvedId,
+        };
+    }, [detail, content, resolvedId]);
 
     useEffect(() => {
         async function fetchDetail() {
@@ -62,6 +75,8 @@ function DetailModal({ content, onClose }) {
                     if (target && target.id) {
                         handlePlay(target.id);
                     }
+                } else if (content.autoPlay) {
+                    handlePlay(content.id);
                 }
             } catch (err) {
                 console.log(err);
@@ -74,7 +89,11 @@ function DetailModal({ content, onClose }) {
 
     const initPlayer = useCallback((video) => {
         console.log("[initPlayer] called, video:", !!video, "streamUrl:", !!streamUrl);
-        if (!video || !streamUrl) return;
+        if (!video) {
+            if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+            return;
+        }
+        if (!streamUrl) return;
         videoRef.current = video;
 
         if (hlsRef.current) {
@@ -85,10 +104,72 @@ function DetailModal({ content, onClose }) {
         const url = streamUrl.proxy;
         console.log("[initPlayer] proxy URL:", url);
 
+        // Cleanup previous listeners to prevent accumulation on episode switch
+        if (cleanupListenersRef.current) {
+            cleanupListenersRef.current();
+            cleanupListenersRef.current = null;
+        }
+
+        const currentPath = playingPathRef.current;
+        const saved = currentPath ? getWatchProgress(currentPath) : null;
+
+        // Watch progress tracking
+        if (currentPath) {
+            let cancelled = false;
+            let lastSaveTime = 0;
+            const saveProgress = () => {
+                if (cancelled) return;
+                if (video.currentTime > 0 && isFinite(video.duration) && video.duration > 0) {
+                    saveWatchProgress(currentPath, {
+                        currentTime: video.currentTime,
+                        duration: video.duration,
+                        ...contentInfoRef.current,
+                    });
+                }
+            };
+            const onTimeUpdate = () => {
+                const now = Date.now();
+                if (now - lastSaveTime < 5000) return;
+                lastSaveTime = now;
+                saveProgress();
+            };
+            const onPause = saveProgress;
+            const onEnded = () => {
+                if (cancelled) return;
+                if (isFinite(video.duration) && video.duration > 0) {
+                    saveWatchProgress(currentPath, {
+                        currentTime: video.duration,
+                        duration: video.duration,
+                        ...contentInfoRef.current,
+                    });
+                }
+            };
+            video.addEventListener('timeupdate', onTimeUpdate);
+            video.addEventListener('pause', onPause);
+            video.addEventListener('ended', onEnded);
+            cleanupListenersRef.current = () => {
+                cancelled = true;
+                video.removeEventListener('timeupdate', onTimeUpdate);
+                video.removeEventListener('pause', onPause);
+                video.removeEventListener('ended', onEnded);
+            };
+        }
+
+        // Resume from saved position
+        const resumePosition = () => {
+            if (saved && saved.currentTime > 5 && saved.duration > 0) {
+                const progress = saved.currentTime / saved.duration;
+                if (progress < 0.95) {
+                    video.currentTime = saved.currentTime;
+                }
+            }
+        };
+
         const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
         if (isSafari && video.canPlayType("application/vnd.apple.mpegurl")) {
             video.src = url;
+            video.addEventListener('loadedmetadata', resumePosition, { once: true });
             video.play().catch((e) => console.error("[initPlayer] native play error:", e));
             return;
         }
@@ -107,6 +188,7 @@ function DetailModal({ content, onClose }) {
             hls.loadSource(url);
             hls.attachMedia(video);
             hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                resumePosition();
                 video.play().catch((e) => console.error("[initPlayer] play() error:", e));
             });
             hls.on(window.Hls.Events.ERROR, (event, data) => {
@@ -132,6 +214,17 @@ function DetailModal({ content, onClose }) {
 
     useEffect(() => {
         return () => {
+            if (cleanupListenersRef.current) cleanupListenersRef.current();
+            if (videoRef.current && playingPathRef.current) {
+                const video = videoRef.current;
+                if (video.currentTime > 0 && isFinite(video.duration) && video.duration > 0) {
+                    saveWatchProgress(playingPathRef.current, {
+                        currentTime: video.currentTime,
+                        duration: video.duration,
+                        ...contentInfoRef.current,
+                    });
+                }
+            }
             if (hlsRef.current) {
                 hlsRef.current.destroy();
             }
@@ -153,6 +246,21 @@ function DetailModal({ content, onClose }) {
     }
 
     async function handlePlay(path) {
+        playingPathRef.current = path;
+        videoRef.current = null;
+        if (cleanupListenersRef.current) {
+            cleanupListenersRef.current();
+            cleanupListenersRef.current = null;
+        }
+        if (detail?.episodes) {
+            const ep = detail.episodes.find(e => e.id === path);
+            if (ep) {
+                contentInfoRef.current = { ...contentInfoRef.current, season: ep.season, episode: ep.episode };
+            } else {
+                const { season, episode, ...rest } = contentInfoRef.current;
+                contentInfoRef.current = rest;
+            }
+        }
         setStreamLoading(true);
         setPlayerError(null);
         setStreamUrl(null);
@@ -180,16 +288,35 @@ function DetailModal({ content, onClose }) {
     }
 
     function handleStopPlaying() {
+        if (cleanupListenersRef.current) {
+            cleanupListenersRef.current();
+            cleanupListenersRef.current = null;
+        }
+        if (videoRef.current && playingPathRef.current) {
+            const video = videoRef.current;
+            if (video.currentTime > 0 && isFinite(video.duration) && video.duration > 0) {
+                saveWatchProgress(playingPathRef.current, {
+                    currentTime: video.currentTime,
+                    duration: video.duration,
+                    ...contentInfoRef.current,
+                });
+            }
+        }
         if (hlsRef.current) {
             hlsRef.current.destroy();
             hlsRef.current = null;
         }
+        playingPathRef.current = null;
         setPlaying(false);
         setStreamUrl(null);
         setPlayerError(null);
     }
 
     const type = parsedBolum ? "series" : (content.type || (content.id?.includes("/dizi/") ? "series" : "movie"));
+    const movieProgress = type === "movie" ? getWatchProgress(content.id) : null;
+    const movieHasProgress = movieProgress && movieProgress.duration > 0 &&
+        (movieProgress.currentTime / movieProgress.duration) > 0.02 &&
+        (movieProgress.currentTime / movieProgress.duration) < 0.95;
 
     return (
         <div className="modal-overlay" onClick={onClose}>
@@ -364,7 +491,7 @@ function DetailModal({ content, onClose }) {
                                     onClick={() => handlePlay(content.id)}
                                     disabled={streamLoading}
                                 >
-                                    {streamLoading ? "Yukleniyor..." : "Izle"}
+                                    {streamLoading ? "Yukleniyor..." : movieHasProgress ? `Devam Et — ${formatTime(movieProgress.currentTime)}` : "Izle"}
                                 </button>
                             </div>
                         ) : (
@@ -392,17 +519,24 @@ function DetailModal({ content, onClose }) {
                                                     ))}
                                                 </div>
                                                 <div className="modal_episode_list">
-                                                    {(seasons[activeSeason] || []).map((ep, i) => (
-                                                        <button
-                                                            key={ep.id || i}
-                                                            className="modal_episode_btn"
-                                                            onClick={() => handlePlay(ep.id)}
-                                                            disabled={streamLoading}
-                                                        >
-                                                            <span className="ep_number">{ep.episode || i + 1}</span>
-                                                            <span className="ep_title">{ep.title}</span>
-                                                        </button>
-                                                    ))}
+                                                    {(seasons[activeSeason] || []).map((ep, i) => {
+                                                        const epProg = getWatchProgress(ep.id);
+                                                        const epPct = epProg && epProg.duration > 0 ? (epProg.currentTime / epProg.duration) * 100 : 0;
+                                                        return (
+                                                            <button
+                                                                key={ep.id || i}
+                                                                className="modal_episode_btn"
+                                                                onClick={() => handlePlay(ep.id)}
+                                                                disabled={streamLoading}
+                                                            >
+                                                                <span className="ep_number">{ep.episode || i + 1}</span>
+                                                                <span className="ep_title">{ep.title}</span>
+                                                                {epPct > 2 && epPct < 95 && (
+                                                                    <div className="ep_progress"><div className="ep_progress_fill" style={{ width: `${epPct}%` }} /></div>
+                                                                )}
+                                                            </button>
+                                                        );
+                                                    })}
                                                 </div>
                                             </>
                                         );

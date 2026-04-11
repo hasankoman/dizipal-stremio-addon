@@ -1,0 +1,75 @@
+/* ── CONTINUE WATCHING ROW ── */
+.cw_row {
+    margin-top: 12px;
+}
+
+.cw_card {
+    position: relative;
+}
+
+.cw_remove {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.85);
+    color: var(--white);
+    border: 1px solid var(--border-muted);
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 2;
+}
+
+.cw_card:hover .cw_remove {
+    opacity: 1;
+}
+
+.cw_remove:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+@media (hover: none) {
+    .cw_remove {
+        opacity: 1;
+    }
+}
+
+.cw_overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 24px 8px 12px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+    pointer-events: none;
+    z-index: 1;
+}
+
+.cw_remaining {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.cw_progress_bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.2);
+    z-index: 2;
+}
+
+.cw_progress_fill {
+    height: 100%;
+    background: var(--accent);
+}
