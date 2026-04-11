@@ -57,19 +57,27 @@ function DetailModal({ content, onClose }) {
                 const res = await axios.get(requests.detail(resolvedId));
                 setDetail(res.data);
 
-                // Fetch trailer from TMDB
-                const name = res.data?.meta?.name;
-                const contentType = resolvedId.includes("/dizi/") ? "series" : "movie";
-                if (name) {
-                    axios.get(requests.trailer(name, contentType))
-                        .then(r => {
-                            if (r.data.url) setTrailerUrl(r.data.url);
-                            if (r.data.tmdb) setTmdb(r.data.tmdb);
-                        })
-                        .catch(() => {})
-                        .finally(() => setTrailerLoading(false));
-                } else {
+                // TMDB/Custom content ise trailer detail'den gelir
+                const isTmdbContent = resolvedId.includes("tmdb:") || resolvedId.includes("custom:");
+                if (isTmdbContent && res.data?.trailer) {
+                    if (res.data.trailer.url) setTrailerUrl(res.data.trailer.url);
+                    if (res.data.trailer.tmdb) setTmdb(res.data.trailer.tmdb);
                     setTrailerLoading(false);
+                } else {
+                    // Fetch trailer from TMDB
+                    const name = res.data?.meta?.name;
+                    const contentType = resolvedId.includes("/dizi/") ? "series" : "movie";
+                    if (name) {
+                        axios.get(requests.trailer(name, contentType))
+                            .then(r => {
+                                if (r.data.url) setTrailerUrl(r.data.url);
+                                if (r.data.tmdb) setTmdb(r.data.tmdb);
+                            })
+                            .catch(() => {})
+                            .finally(() => setTrailerLoading(false));
+                    } else {
+                        setTrailerLoading(false);
+                    }
                 }
 
                 if (parsedBolum) {
@@ -285,7 +293,7 @@ function DetailModal({ content, onClose }) {
                 setStreamUrl(urls);
                 setPlaying(true);
             } else if (res.data && res.data.embedUrl) {
-                setStreamUrl({ embed: res.data.embedUrl });
+                setStreamUrl({ embed: res.data.embedUrl, sources: res.data.sources || null });
                 setPlaying(true);
             } else {
                 setPlayerError("Stream URL bulunamadi.");
@@ -323,7 +331,7 @@ function DetailModal({ content, onClose }) {
         setPlayerError(null);
     }
 
-    const type = parsedBolum ? "series" : (content.type || (content.id?.includes("/dizi/") ? "series" : "movie"));
+    const type = parsedBolum ? "series" : (content.type || (content.id?.includes("/dizi/") || content.id?.includes(":series:") ? "series" : "movie"));
 
     const currentEpisodeNav = useMemo(() => {
         if (!playingEpisodeId || !detail?.episodes?.length) return { prev: null, next: null, current: null };
@@ -366,6 +374,11 @@ function DetailModal({ content, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [nextCountdown]);
 
+    function handleDownload(path) {
+        const backendUrl = process.env.REACT_APP_BACKEND_URL || "";
+        window.open(backendUrl + requests.download(path), "_blank");
+    }
+
     const movieProgress = type === "movie" ? getWatchProgress(content.id) : null;
     const movieHasProgress = movieProgress && movieProgress.duration > 0 &&
         (movieProgress.currentTime / movieProgress.duration) > 0.02 &&
@@ -383,7 +396,7 @@ function DetailModal({ content, onClose }) {
                                     title="Player"
                                     className="modal_embed"
                                     allowFullScreen
-                                    allow="autoplay; encrypted-media"
+                                    allow="autoplay; encrypted-media; fullscreen"
                                     referrerPolicy="origin"
                                 />
                             ) : (
@@ -398,7 +411,7 @@ function DetailModal({ content, onClose }) {
                             {playerError && (
                                 <div className="modal_player_error">{playerError}</div>
                             )}
-                            <button className="modal_back_btn" onClick={handleStopPlaying} aria-label="Geri">
+                            <button className={`modal_back_btn${streamUrl.embed?.includes("multiembed") ? " modal_back_btn_multi" : ""}`} onClick={handleStopPlaying} aria-label="Geri">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="square"><line x1="14" y1="8" x2="2" y2="8"/><polyline points="7,2 2,8 7,14"/></svg>
                             </button>
                             {showNextPrompt && currentEpisodeNav.next && (
@@ -473,17 +486,34 @@ function DetailModal({ content, onClose }) {
                                 </button>
                             </div>
                         )}
-                        {!streamUrl.embed && (
-                            <div className="modal_alt_players">
-                                {streamUrl.vlc && (
-                                    <a href={streamUrl.vlc} className="modal_alt_btn">VLC</a>
-                                )}
-                                {streamUrl.infuse && (
-                                    <a href={streamUrl.infuse} className="modal_alt_btn">Infuse</a>
-                                )}
-                                {streamUrl.direct && (
-                                    <a href={streamUrl.direct} target="_blank" rel="noreferrer" className="modal_alt_btn">Safari</a>
-                                )}
+                        {streamUrl.sources && streamUrl.sources.length > 1 && (
+                            <div className="modal_source_selector">
+                                <label className="modal_source_label">Kaynak:</label>
+                                <select
+                                    className="modal_source_dropdown"
+                                    value={streamUrl.embed}
+                                    onChange={(e) => setStreamUrl({ ...streamUrl, embed: e.target.value })}
+                                >
+                                    {streamUrl.sources.map((s) => (
+                                        <option key={s.name} value={s.url}>
+                                            {s.name}{s.hasTurkishSub ? " (TR Altyazı)" : ""}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                        {streamUrl.sources && (
+                            <div className="modal_ublock_bar">
+                                <p className="modal_ublock_sub">Türkçe altyazı player içindeki ayarlardan seçilebilir.</p>
+                                <p className="modal_ublock_text">Reklamlar video kaynaklarından gelmektedir ve tarafımızca engellenememektedir. Reklamsız bir deneyim için uBlock Origin eklentisini yükleyin.</p>
+                                <a
+                                    href="https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="modal_ublock_btn"
+                                >
+                                    uBlock Origin Y&#252;kle
+                                </a>
                             </div>
                         )}
                     </div>
@@ -517,9 +547,6 @@ function DetailModal({ content, onClose }) {
                                     <div className="modal_banner_meta">
                                         {tmdb?.tmdbRating && (
                                             <span className="modal_rating">TMDB {tmdb.tmdbRating}</span>
-                                        )}
-                                        {detail?.meta?.imdbRating > 0 && (
-                                            <span className="modal_rating">IMDB {detail.meta.imdbRating}</span>
                                         )}
                                         {(tmdb?.releaseDate || detail?.meta?.releaseInfo) && (
                                             <span className="modal_year">{tmdb?.releaseDate ? tmdb.releaseDate.substring(0, 4) : detail.meta.releaseInfo}</span>
@@ -565,7 +592,16 @@ function DetailModal({ content, onClose }) {
                                     <span className="modal_runtime">{tmdb.seasonCount} Sezon</span>
                                 )}
                                 {tmdb?.status && (
-                                    <span className="modal_status">{tmdb.status}</span>
+                                    <span className="modal_status">{{
+                                        "Returning Series": "Devam Ediyor",
+                                        "Ended": "Final",
+                                        "Canceled": "İptal",
+                                        "In Production": "Yapımda",
+                                        "Planned": "Planlanıyor",
+                                        "Released": "Yayında",
+                                        "Post Production": "Post Prodüksiyon",
+                                        "Rumored": "Söylenti",
+                                    }[tmdb.status] || tmdb.status}</span>
                                 )}
                             </div>
                             {tmdb?.genres?.length > 0 && (
@@ -617,6 +653,13 @@ function DetailModal({ content, onClose }) {
                                 >
                                     {streamLoading ? "Yukleniyor..." : movieHasProgress ? `Devam Et — ${formatTime(movieProgress.currentTime)}` : "Izle"}
                                 </button>
+                                <button
+                                    className="modal_download_btn"
+                                    onClick={() => handleDownload(content.id)}
+                                    disabled={streamLoading}
+                                >
+                                    {"Indir"}
+                                </button>
                             </div>
                         ) : (
                             <div className="modal_episodes">
@@ -647,18 +690,27 @@ function DetailModal({ content, onClose }) {
                                                         const epProg = getWatchProgress(ep.id);
                                                         const epPct = epProg && epProg.duration > 0 ? (epProg.currentTime / epProg.duration) * 100 : 0;
                                                         return (
-                                                            <button
-                                                                key={ep.id || i}
-                                                                className="modal_episode_btn"
-                                                                onClick={() => handlePlay(ep.id)}
-                                                                disabled={streamLoading}
-                                                            >
-                                                                <span className="ep_number">{ep.episode || i + 1}</span>
-                                                                <span className="ep_title">{ep.title}</span>
-                                                                {epPct > 2 && epPct < 95 && (
-                                                                    <div className="ep_progress"><div className="ep_progress_fill" style={{ width: `${epPct}%` }} /></div>
-                                                                )}
-                                                            </button>
+                                                            <div key={ep.id || i} className="modal_episode_row">
+                                                                <button
+                                                                    className="modal_episode_btn"
+                                                                    onClick={() => handlePlay(ep.id)}
+                                                                    disabled={streamLoading}
+                                                                >
+                                                                    <span className="ep_number">{ep.episode || i + 1}</span>
+                                                                    <span className="ep_title">{ep.title}</span>
+                                                                    {epPct > 2 && epPct < 95 && (
+                                                                        <div className="ep_progress"><div className="ep_progress_fill" style={{ width: `${epPct}%` }} /></div>
+                                                                    )}
+                                                                </button>
+                                                                <button
+                                                                    className="modal_ep_download"
+                                                                    onClick={() => handleDownload(ep.id)}
+                                                                    disabled={false}
+                                                                    aria-label="Indir"
+                                                                >
+                                                                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square"><line x1="7" y1="1" x2="7" y2="10"/><polyline points="3,7 7,11 11,7"/><line x1="2" y1="13" x2="12" y2="13"/></svg>
+                                                                </button>
+                                                            </div>
                                                         );
                                                     })}
                                                 </div>

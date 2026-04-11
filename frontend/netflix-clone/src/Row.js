@@ -28,13 +28,13 @@ function Row({ title, isHomepage, onSelect, onNavigate }) {
                         <h2>{section.title}</h2>
                         {section.title === "Tüm Diziler" && onNavigate && (
                             <button className="row_see_all" onClick={() => onNavigate("diziler")}>
-                                <span>T&uuml;m&uuml;n&uuml; G&ouml;r</span>
+                                <span>Tümünü Gör</span>
                                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><line x1="2" y1="7" x2="12" y2="7"/><polyline points="8,3 12,7 8,11"/></svg>
                             </button>
                         )}
                         {section.title === "Tüm Filmler" && onNavigate && (
                             <button className="row_see_all" onClick={() => onNavigate("filmler")}>
-                                <span>T&uuml;m&uuml;n&uuml; G&ouml;r</span>
+                                <span>Tümünü Gör</span>
                                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><line x1="2" y1="7" x2="12" y2="7"/><polyline points="8,3 12,7 8,11"/></svg>
                             </button>
                         )}
@@ -70,6 +70,7 @@ function Row({ title, isHomepage, onSelect, onNavigate }) {
                                             onError={(e) => { e.target.src = "https://via.placeholder.com/200x300?text=No+Image"; }}
                                         />
                                         {episodeTag && <span className="row_card_badge">{episodeTag}</span>}
+                                        {item.source === "Manuel" && <span className="row_card_badge row_card_badge_manual">Manuel</span>}
                                     </div>
                                 </div>
                             );

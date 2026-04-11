@@ -134,6 +134,18 @@
   display: inline-block;
 }
 
+.search-results_badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #000;
+  background: #f5c518;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  display: inline-block;
+  margin-left: 6px;
+}
+
 /* ── EMPTY STATE ── */
 .search-results_empty {
   display: flex;
@@ -149,6 +161,71 @@
   padding: 100px 0;
   border: var(--border-width) dashed var(--border-muted);
   margin-top: 20px;
+}
+
+/* ── EKSİK FİLM SECTION ── */
+.search-results_eksik {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 2px dashed #f5c518;
+}
+
+.search-results_eksik-title {
+  color: #f5c518;
+}
+
+.search-results_eksik-count {
+  background: #f5c518;
+  color: #000;
+  border-color: #f5c518;
+}
+
+.search-results_eksik-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  letter-spacing: 1px;
+}
+
+.search-results_eksik-sub {
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin: 16px 0 10px;
+  color: var(--text-muted);
+}
+
+.search-results_card-eksik {
+  border-color: #f5c51833;
+}
+
+.search-results_card-eksik:hover {
+  border-color: #f5c518;
+}
+
+.search-results_info-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.search-results_badge-tmdb {
+  font-size: 9px;
+  font-weight: 700;
+  color: #000;
+  background: #f5c518;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  display: inline-block;
+}
+
+.search-results_year {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
 }
 
 @media (max-width: 768px) {

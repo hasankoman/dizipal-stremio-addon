@@ -8,6 +8,7 @@ const express = require("express");
 const app = express();
 const searchVideo = require("./src/search");
 const listVideo = require("./src/videos");
+const customContent = require("./src/customContent");
 const path = require("path");
 const NodeCache = require("node-cache");
 const { v4: uuidv4 } = require('uuid');
@@ -86,11 +87,56 @@ app.get("/api/search", async (req, res) => {
             title: item.title,
             poster: item.poster || "",
             year: item.genres || "",
-            url: item.url
+            url: item.url,
+            source: "Repertuar"
         }));
+
+        // TMDB'de ara - repertuarda olmayanları "eksik" olarak göster
+        var eksik = [];
+        try {
+            var tmdbHeaders = { Authorization: `Bearer ${process.env.TMDB_TOKEN}` };
+            var tmdbRes = await axios.get(
+                `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&language=tr-TR`,
+                { headers: tmdbHeaders, cache: false }
+            );
+            var tmdbResults = tmdbRes.data.results || [];
+            for (var tmdbItem of tmdbResults) {
+                if (tmdbItem.media_type !== "movie" && tmdbItem.media_type !== "tv") continue;
+                var tmdbTitle = tmdbItem.title || tmdbItem.name || "";
+                if (!tmdbTitle) continue;
+                // Repertuarda zaten var mı kontrol et (benzerlik %80+ ise duplicate say)
+                var tmdbTitleLower = tmdbTitle.toLowerCase();
+                var alreadyExists = all.some(a => {
+                    var aLower = a.title.toLowerCase();
+                    if (aLower === tmdbTitleLower) return true;
+                    // Kısa başlıklar (5 karakter altı) tam eşleşme gerektirir
+                    if (aLower.length < 5 || tmdbTitleLower.length < 5) return false;
+                    // Uzun başlıklarda: biri diğerini içeriyorsa VE uzunluk farkı az ise
+                    if (aLower.includes(tmdbTitleLower) || tmdbTitleLower.includes(aLower)) {
+                        var ratio = Math.min(aLower.length, tmdbTitleLower.length) / Math.max(aLower.length, tmdbTitleLower.length);
+                        return ratio > 0.7;
+                    }
+                    return false;
+                });
+                if (!alreadyExists) {
+                    var eType = tmdbItem.media_type === "tv" ? "series" : "movie";
+                    eksik.push({
+                        id: "tmdb:" + eType + ":" + tmdbItem.id,
+                        type: eType,
+                        title: tmdbTitle,
+                        poster: tmdbItem.poster_path ? `https://image.tmdb.org/t/p/w500${tmdbItem.poster_path}` : "",
+                        year: (tmdbItem.release_date || tmdbItem.first_air_date || "").substring(0, 4),
+                        url: "tmdb:" + eType + ":" + tmdbItem.id,
+                        source: "TMDB"
+                    });
+                }
+            }
+        } catch(e) { console.log("TMDB search error:", e.message); }
+
         var result = {
             diziler: all.filter(i => i.type === "series"),
-            filmler: all.filter(i => i.type === "movie")
+            filmler: all.filter(i => i.type === "movie"),
+            eksik: eksik
         };
         myCache.set("api_search_" + query, result);
         return respond(res, result);
@@ -288,6 +334,14 @@ app.get("/api/homepage", async (req, res) => {
             }
         } catch(e) { console.log("Filmler page error:", e.message); }
 
+        // Manuel eklenen içerikler
+        try {
+            var customItems = await customContent.getAllCustomContent();
+            if (customItems.length > 0) {
+                sections.unshift({ title: "Manuel Eklenen", items: customItems });
+            }
+        } catch(e) { console.log("Custom content homepage error:", e.message); }
+
         myCache.set("api_homepage", { sections }, 3600);
         return respond(res, { sections });
     } catch (error) {
@@ -299,6 +353,24 @@ app.get("/api/homepage", async (req, res) => {
 app.get("/api/detail/:path(*)", async (req, res) => {
     try {
         var contentPath = "/" + req.params.path;
+
+        // TMDB content kontrolü (tmdb:movie:12345 veya tmdb:series:12345)
+        var tmdbMatch = contentPath.match(/\/?(tmdb|custom):(movie|series):(\d+)/);
+        if (tmdbMatch) {
+            var cType = tmdbMatch[2];
+            var cTmdbId = tmdbMatch[3];
+            var cacheKey = "api_detail_tmdb_" + cType + "_" + cTmdbId;
+            var cached = myCache.get(cacheKey);
+            if (cached) return respond(res, cached);
+
+            var tmdbDetail = await customContent.getCustomDetail(cTmdbId, cType);
+            if (tmdbDetail) {
+                myCache.set(cacheKey, tmdbDetail);
+                return respond(res, tmdbDetail);
+            }
+            return respond(res, { meta: null, episodes: [] });
+        }
+
         var cached = myCache.get("api_detail_" + contentPath);
         if (cached) return respond(res, cached);
 
@@ -405,9 +477,101 @@ app.get("/api/trailer", async (req, res) => {
     }
 });
 
+const { spawn } = require('child_process');
+const os = require('os');
+
+app.get("/api/download/:path(*)", async (req, res) => {
+    try {
+        var contentPath = "/" + req.params.path;
+        var video = await listVideo.GetVideos(contentPath);
+
+        if (!video || !video.url) {
+            return res.status(404).json({ error: "Video bulunamadi" });
+        }
+
+        var filename = contentPath.replace(/\//g, "_").replace(/^_/, "") + ".mp4";
+        var referer = video.referer || process.env.PROXY_URL + "/";
+        var tmpFile = path.join(os.tmpdir(), "dl_" + Date.now() + ".mp4");
+
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.setHeader("Content-Type", "video/mp4");
+
+        var ytdlp = spawn("yt-dlp", [
+            "--referer", referer,
+            "--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "-o", tmpFile,
+            "--no-part",
+            "--quiet",
+            video.url
+        ]);
+
+        var aborted = false;
+
+        req.on("close", () => {
+            aborted = true;
+            ytdlp.kill("SIGTERM");
+            fs.unlink(tmpFile, () => {});
+        });
+
+        ytdlp.on("close", (code) => {
+            if (aborted) return;
+            if (code === 0 && fs.existsSync(tmpFile)) {
+                var stat = fs.statSync(tmpFile);
+                res.setHeader("Content-Length", stat.size);
+                var stream = fs.createReadStream(tmpFile);
+                stream.pipe(res);
+                stream.on("end", () => fs.unlink(tmpFile, () => {}));
+                stream.on("error", () => { fs.unlink(tmpFile, () => {}); res.end(); });
+            } else {
+                if (!res.headersSent) res.status(500).json({ error: "Indirme hatasi" });
+                fs.unlink(tmpFile, () => {});
+            }
+        });
+
+        ytdlp.on("error", (err) => {
+            console.log("yt-dlp error:", err);
+            if (!res.headersSent) res.status(500).json({ error: "yt-dlp hatasi" });
+        });
+
+    } catch (error) {
+        console.log(error);
+        if (!res.headersSent) res.status(500).json({ error: "Indirme hatasi" });
+    }
+});
+
 app.get("/api/stream/:path(*)", async (req, res) => {
     try {
         var contentPath = "/" + req.params.path;
+
+        // TMDB content stream (tmdb:movie:12345 veya tmdb:series:12345:1:3)
+        var tmdbMatch = contentPath.match(/\/?(tmdb|custom):(movie|series):(\d+)(?::(\d+):(\d+))?/);
+        if (tmdbMatch) {
+            var cType = tmdbMatch[2];
+            var cTmdbId = tmdbMatch[3];
+            var cSeason = tmdbMatch[4] || "1";
+            var cEpisode = tmdbMatch[5] || "1";
+
+            var sources = [];
+            if (cType === "movie") {
+                sources = [
+                    { name: "Videasy", url: "https://player.videasy.net/movie/" + cTmdbId, hasTurkishSub: true },
+                    { name: "VidSrc.me", url: "https://vidsrc-embed.ru/embed/movie/" + cTmdbId + "?ds_lang=tr", hasTurkishSub: true },
+                    { name: "VidSrc", url: "https://vidsrc.cc/v2/embed/movie/" + cTmdbId, hasTurkishSub: false },
+                    { name: "MultiEmbed", url: "https://multiembed.mov/?video_id=" + cTmdbId + "&tmdb=1", hasTurkishSub: false },
+                ];
+            } else {
+                sources = [
+                    { name: "Videasy", url: "https://player.videasy.net/tv/" + cTmdbId + "/" + cSeason + "/" + cEpisode, hasTurkishSub: true },
+                    { name: "VidSrc.me", url: "https://vidsrc-embed.ru/embed/tv/" + cTmdbId + "/" + cSeason + "/" + cEpisode + "?ds_lang=tr", hasTurkishSub: true },
+                    { name: "VidSrc", url: "https://vidsrc.cc/v2/embed/tv/" + cTmdbId + "/" + cSeason + "/" + cEpisode, hasTurkishSub: false },
+                    { name: "MultiEmbed", url: "https://multiembed.mov/?video_id=" + cTmdbId + "&tmdb=1&s=" + cSeason + "&e=" + cEpisode, hasTurkishSub: false },
+                ];
+            }
+            // Türkçe altyazılı olanlar önce
+            sources.sort((a, b) => (b.hasTurkishSub ? 1 : 0) - (a.hasTurkishSub ? 1 : 0));
+            return respond(res, { url: null, embedUrl: sources[0].url, sources: sources });
+        }
+
         var video = await listVideo.GetVideos(contentPath);
         if (video) {
             // If it's an embed URL (Cloudflare protected), return it for client-side iframe playback
@@ -502,9 +666,9 @@ app.get('/addon/meta/:type/:id/', async (req, res, next) => {
             //series or movie check
             if (type === "series") {
                 for (let i = 1; i <= data.season; i++) {
-                    var dizipalVideo = await searchVideo.SearchDetailMovieAndSeries(id, type, i);
-                    if (dizipalVideo && typeof (dizipalVideo) !== "undefined") {
-                        dizipalVideo.forEach(element => {
+                    var sourceVideo = await searchVideo.SearchDetailMovieAndSeries(id, type, i);
+                    if (sourceVideo && typeof (sourceVideo) !== "undefined") {
+                        sourceVideo.forEach(element => {
                             if (typeof (element.title) !== "undefined") {
                                 metaObj.videos.push({
                                     id: element.id,
@@ -573,14 +737,14 @@ app.get('/addon/subtitles/:type/:id/:query?.json', async (req, res, next) => {
                     var url = String(value).replace("[Türkçe]", "");
                     var newUrl = await WriteSubtitles(url, uuidv4());
                     if (newUrl) {
-                        subtitles.push({ url: newUrl, lang: "tur",id:"dizipal-tur" });
+                        subtitles.push({ url: newUrl, lang: "tur",id:"sub-tur" });
                     }
                 }
                 if (String(value).includes("İngilizce")) {
                     var url = String(value).replace("[İngilizce]", "");
                     var newUrl = await WriteSubtitles(url, uuidv4());
                     if (newUrl) {
-                        subtitles.push({ url: newUrl, lang: "eng",id:"dizipal-eng" });
+                        subtitles.push({ url: newUrl, lang: "eng",id:"sub-eng" });
                     }
                 }
             }

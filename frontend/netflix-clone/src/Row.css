@@ -99,6 +99,12 @@
   letter-spacing: 1px;
 }
 
+.row_card_badge_manual {
+  background: #f5c518;
+  color: #000;
+  font-size: 9px;
+}
+
 .row_thumbnail {
   width: 100%;
   aspect-ratio: 2/3;

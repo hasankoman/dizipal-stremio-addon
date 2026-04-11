@@ -348,6 +348,74 @@
   box-shadow: none;
 }
 
+/* ── DOWNLOAD BUTTON (movie) ── */
+.modal_download_btn {
+  width: 100%;
+  padding: 14px;
+  background: transparent;
+  color: var(--white);
+  border: var(--border-width) solid var(--white);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  margin-top: 8px;
+  transition: background 0.1s, box-shadow 0.1s;
+}
+
+.modal_download_btn:hover {
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.modal_download_btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── EPISODE ROW (play + download) ── */
+.modal_episode_row {
+  display: flex;
+  align-items: stretch;
+}
+
+.modal_episode_row .modal_episode_btn {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal_ep_download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border-muted);
+  border-top: none;
+  border-left: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+
+.modal_episode_row:first-child .modal_ep_download {
+  border-top: var(--border-width) solid var(--border-muted);
+}
+
+.modal_ep_download:hover:not(:disabled) {
+  color: var(--white);
+  background: var(--accent);
+}
+
+.modal_ep_download:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
 /* ── TRAILER BUTTON ── */
 .modal_trailer_btn {
   width: 100%;
@@ -443,6 +511,134 @@
   .modal_ep_nav_info {
     padding: 10px 12px;
     font-size: 11px;
+  }
+}
+
+.modal_source_selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-top: var(--border-width) solid var(--border-muted);
+}
+
+.modal_source_label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  white-space: nowrap;
+}
+
+.modal_source_dropdown {
+  flex: 1;
+  padding: 8px 12px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--white);
+  background: var(--card);
+  border: var(--border-width) solid var(--border-muted);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+}
+
+.modal_source_dropdown:hover {
+  border-color: var(--white);
+}
+
+.modal_source_dropdown:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.modal_ublock_bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 10px 16px;
+  background: #1a1a1a;
+  border-top: 1px solid var(--border-muted);
+}
+
+.modal_ublock_sub {
+  width: 100%;
+  font-size: 11px;
+  color: #f5c518;
+  line-height: 1.4;
+  margin: 0;
+  font-weight: 700;
+}
+
+.modal_ublock_text {
+  flex: 1;
+  font-size: 11px;
+  color: #888;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.modal_ublock_btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #de3f32;
+  background: transparent;
+  border: 1px solid #de3f3255;
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.modal_ublock_btn:hover {
+  background: #de3f32;
+  color: #fff;
+  border-color: #de3f32;
+}
+
+@media (max-width: 600px) {
+  .modal_source_selector {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .modal_source_label {
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+  .modal_source_dropdown {
+    flex: 1 1 100%;
+    font-size: 11px;
+    padding: 8px 10px;
+  }
+  .modal_ublock_bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px;
+  }
+  .modal_ublock_text {
+    font-size: 10px;
+    text-align: center;
+  }
+  .modal_ublock_btn {
+    justify-content: center;
+    font-size: 10px;
+    padding: 10px;
   }
 }
 
@@ -636,6 +832,7 @@
   display: block;
 }
 
+
 .modal_back_btn {
   position: absolute;
   top: 12px;
@@ -648,8 +845,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
-  transition: background 0.1s;
+  z-index: 20;
+  transition: background 0.1s, top 0.15s;
+}
+
+.modal_back_btn_multi {
+  left: 132px;
 }
 
 .modal_back_btn:hover {
@@ -820,6 +1021,9 @@
   }
   .modal_banner_bg {
     height: 200px;
+  }
+  .modal_banner_trailer {
+    height: 220px;
   }
   .modal_title {
     font-size: 1.4rem;
