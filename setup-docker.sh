@@ -21,7 +21,7 @@ services:
     environment:
       - PORT=7000
       - HOSTING_URL=https://movie.hasankoman.dev
-      - PROXY_URL=https://dizipal2042.com
+      - PROXY_URL=https://dizipal2043.com
       - URLGETSTATUS=false
     labels:
       - traefik.enable=true

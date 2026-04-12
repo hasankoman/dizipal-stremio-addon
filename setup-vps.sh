@@ -21,7 +21,7 @@ echo "==> Creating .env..."
 cat > .env << EOF
 PORT=7000
 HOSTING_URL=http://${VPS_IP}:7000
-PROXY_URL=https://dizipal2042.com
+PROXY_URL=https://dizipal2043.com
 URLGETSTATUS=false
 EOF
 
