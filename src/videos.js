@@ -11,6 +11,29 @@ const axios = setupCache(instance);
 
 const DECRYPT_KEY = "3hPn4uCjTVtfYWcjIcoJQ4cL1WWk1qxXI39egLYOmNv6IblA7eKJz68uU3eLzux1biZLCms0quEjTYniGv5z1JcKbNIsDQFSeIZOBZJz4is6pD7UyWDggWWzTLBQbHcQFpBQdClnuQaMNUHtLHTpzCvZy33p6I7wFBvL4fnXBYH84aUIyWGTRvM2G5cfoNf4705tO2kv";
 
+function getPageContext(response, requestedUrl) {
+    var responseUrl =
+        (((response || {}).request || {}).res || {}).responseUrl ||
+        ((response || {}).request || {}).responseURL ||
+        requestedUrl;
+
+    try {
+        var pageUrl = new URL(responseUrl, requestedUrl).toString();
+        return { pageUrl, baseUrl: new URL(pageUrl).origin };
+    } catch (e) {
+        return { pageUrl: requestedUrl, baseUrl: process.env.PROXY_URL };
+    }
+}
+
+function makeAbsoluteUrl(url, baseUrl) {
+    if (!url) return url;
+    try {
+        return new URL(url, baseUrl).toString();
+    } catch (e) {
+        return url;
+    }
+}
+
 function decryptIframeUrl(jsonStr) {
     try {
         var data = JSON.parse(jsonStr);
@@ -31,9 +54,10 @@ function decryptIframeUrl(jsonStr) {
 
 async function GetVideos(id) {
     try {
+        var requestedUrl = new URL(id, process.env.PROXY_URL).toString();
         var response = await Axios({
             ...sslfix,
-            url: process.env.PROXY_URL + id,
+            url: requestedUrl,
             headers: {
                 ...header,
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -43,6 +67,9 @@ async function GetVideos(id) {
         });
 
         if (response && response.status == 200) {
+            var pageContext = getPageContext(response, requestedUrl);
+            var pageBaseUrl = pageContext.baseUrl;
+            var pageUrl = pageContext.pageUrl;
             var $ = cheerio.load(response.data);
 
             // Method 1: Decrypt encrypted iframe URL from data-rm-k
@@ -53,11 +80,12 @@ async function GetVideos(id) {
                     var iframeUrl = decryptIframeUrl(encryptedJson);
                     if (iframeUrl) {
                         if (!iframeUrl.startsWith("http")) iframeUrl = "https:" + iframeUrl;
+                        iframeUrl = makeAbsoluteUrl(iframeUrl, pageBaseUrl);
                         // Try to scrape the actual video URL from the embed page
-                        var scraped = await ScrapeVideoUrl(iframeUrl, process.env.PROXY_URL + "/");
+                        var scraped = await ScrapeVideoUrl(iframeUrl, pageBaseUrl + "/");
                         if (scraped) return scraped;
                         // Fallback: return the iframe URL for client-side playback
-                        return { url: iframeUrl, embedUrl: iframeUrl, subtitles: null, referer: process.env.PROXY_URL + "/" };
+                        return { url: iframeUrl, embedUrl: iframeUrl, subtitles: null, referer: pageBaseUrl + "/" };
                     }
                 }
             }
@@ -72,13 +100,13 @@ async function GetVideos(id) {
             if (cfg) {
                 var playerResponse = await Axios({
                     ...sslfix,
-                    url: process.env.PROXY_URL + "/ajax-player-config",
+                    url: pageBaseUrl + "/ajax-player-config",
                     headers: {
                         ...header,
                         "Content-Type": "application/x-www-form-urlencoded",
                         "X-Requested-With": "XMLHttpRequest",
-                        "Referer": process.env.PROXY_URL + id,
-                        "Origin": process.env.PROXY_URL,
+                        "Referer": pageUrl,
+                        "Origin": pageBaseUrl,
                         "Cookie": cookies,
                     },
                     method: "POST",
@@ -87,22 +115,22 @@ async function GetVideos(id) {
                 if (playerResponse && playerResponse.status == 200 && playerResponse.data) {
                     var data = playerResponse.data;
                     if (data.success && data.config) {
-                        var videoUrl = data.config.v || "";
+                        var videoUrl = makeAbsoluteUrl(data.config.v || "", pageBaseUrl);
                         var videoType = data.config.t || "embed";
                         if (videoType === "embed" && videoUrl) {
-                            var scraped = await ScrapeVideoUrl(videoUrl, process.env.PROXY_URL + "/");
+                            var scraped = await ScrapeVideoUrl(videoUrl, pageBaseUrl + "/");
                             if (scraped) return scraped;
                             // Fallback: return embed URL for client-side iframe playback
-                            return { url: videoUrl, embedUrl: videoUrl, subtitles: null, referer: process.env.PROXY_URL + "/" };
+                            return { url: videoUrl, embedUrl: videoUrl, subtitles: null, referer: pageBaseUrl + "/" };
                         }
-                        else if (videoUrl) return { url: videoUrl, subtitles: null };
+                        else if (videoUrl) return { url: videoUrl, subtitles: null, referer: pageBaseUrl + "/" };
                     }
                 }
             }
 
             // Method 3: Fallback old iframe method
             var videoLink = $("#vast_new > iframe").attr("src");
-            if (videoLink) return await ScrapeVideoUrl(videoLink, process.env.PROXY_URL + "/");
+            if (videoLink) return await ScrapeVideoUrl(makeAbsoluteUrl(videoLink, pageBaseUrl), pageBaseUrl + "/");
         }
     } catch (error) {
         console.log(error);
