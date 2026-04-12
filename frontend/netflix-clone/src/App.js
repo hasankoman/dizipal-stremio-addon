@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Row from "./Row";
 import Banner from "./Banner";
 import SearchBar from "./SearchBar";
@@ -8,21 +8,163 @@ import ListPage from "./ListPage";
 import ContinueWatchingRow from "./ContinueWatchingRow";
 import "./App.css";
 
+const APP_BASE = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+const HOME_PATH = APP_BASE || "/";
+const DETAIL_PATH = `${APP_BASE}/detail`;
+
+function normalizePathname(pathname) {
+    const normalized = pathname.replace(/\/+$/, "");
+    return normalized || "/";
+}
+
+function buildDetailUrl(content) {
+    const params = new URLSearchParams();
+    params.set("id", content.id);
+
+    if (content.title) params.set("title", content.title);
+    if (content.autoPlay) params.set("autoplay", "1");
+
+    return `${DETAIL_PATH}?${params.toString()}`;
+}
+
+function readRouteFromLocation(location = window.location, state = window.history.state) {
+    if (normalizePathname(location.pathname) !== normalizePathname(DETAIL_PATH)) {
+        return { page: "home", content: null };
+    }
+
+    const params = new URLSearchParams(location.search);
+    const id = params.get("id");
+
+    if (!id) {
+        return { page: "home", content: null };
+    }
+
+    const stateContent = state?.content?.id === id ? state.content : null;
+
+    return {
+        page: "detail",
+        content: {
+            id,
+            title: params.get("title") || stateContent?.title || "",
+            poster: stateContent?.poster || "",
+            type: stateContent?.type,
+            autoPlay: params.get("autoplay") === "1" || Boolean(stateContent?.autoPlay),
+        },
+    };
+}
+
 function App() {
     const [searchResults, setSearchResults] = useState(null);
-    const [selectedContent, setSelectedContent] = useState(null);
     const [listPage, setListPage] = useState(null); // "diziler" or "filmler"
     const [menuOpen, setMenuOpen] = useState(false);
     const [cwRefresh, setCwRefresh] = useState(0);
+    const [route, setRoute] = useState(() => readRouteFromLocation());
+    const previousRouteRef = useRef(route.page);
 
     function handleBack() {
         setListPage(null);
     }
 
+    const navigateHome = useCallback(({ replace = false } = {}) => {
+        const isAlreadyHome =
+            normalizePathname(window.location.pathname) === normalizePathname(HOME_PATH) &&
+            !window.location.search &&
+            !window.location.hash;
+
+        if (!isAlreadyHome) {
+            window.history[replace ? "replaceState" : "pushState"]({ page: "home" }, "", HOME_PATH);
+        }
+
+        setRoute({ page: "home", content: null });
+    }, []);
+
+    const handleSelectContent = useCallback((content) => {
+        if (!content?.id) return;
+
+        window.history.pushState(
+            { page: "detail", fromApp: true, content },
+            "",
+            buildDetailUrl(content)
+        );
+
+        setRoute({ page: "detail", content });
+    }, []);
+
+    const handleCloseDetail = useCallback(() => {
+        if (window.history.state?.fromApp) {
+            window.history.back();
+            return;
+        }
+
+        navigateHome({ replace: true });
+    }, [navigateHome]);
+
+    useEffect(() => {
+        if (!window.history.state?.page) {
+            window.history.replaceState(
+                route.page === "detail" ? { page: "detail", content: route.content } : { page: "home" },
+                "",
+                window.location.pathname + window.location.search + window.location.hash
+            );
+        }
+
+        const handlePopState = (event) => {
+            setRoute(readRouteFromLocation(window.location, event.state));
+        };
+
+        window.addEventListener("popstate", handlePopState);
+        return () => window.removeEventListener("popstate", handlePopState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        setMenuOpen(false);
+
+        if (previousRouteRef.current === "detail" && route.page !== "detail") {
+            setCwRefresh((current) => current + 1);
+        }
+
+        previousRouteRef.current = route.page;
+    }, [route.page]);
+
+    function handleShowHome() {
+        setListPage(null);
+        setSearchResults(null);
+        navigateHome();
+    }
+
+    function handleShowList(type) {
+        setListPage(type);
+        setSearchResults(null);
+        navigateHome();
+    }
+
+    function handleShowSearchResults(results) {
+        setSearchResults(results);
+        setListPage(null);
+        navigateHome();
+    }
+
+    function handleClearSearch() {
+        setSearchResults(null);
+        navigateHome();
+    }
+
+    if (route.page === "detail") {
+        return (
+            <DetailModal
+                key={`${route.content.id}:${route.content.autoPlay ? "auto" : "manual"}`}
+                content={route.content}
+                onClose={handleCloseDetail}
+                pageMode
+            />
+        );
+    }
+
     return (
         <div className="App">
             <nav className={`nav ${menuOpen ? "nav--open" : ""}`}>
-                <span className="nav_logo" lang="en" onClick={() => { setListPage(null); setSearchResults(null); setMenuOpen(false); }}>
+                <span className="nav_logo" lang="en" onClick={handleShowHome}>
                     <img className="nav_logo_img" src="/logo192.png" alt="KomanMovie" />
                     <span className="nav_logo_text">KomanMovie</span>
                 </span>
@@ -34,36 +176,29 @@ function App() {
                     )}
                 </button>
                 <div className="nav_links">
-                    <button className={`nav_link ${listPage === "diziler" ? "nav_link--active" : ""}`} onClick={() => { setListPage("diziler"); setSearchResults(null); setMenuOpen(false); }}>Diziler</button>
-                    <button className={`nav_link ${listPage === "filmler" ? "nav_link--active" : ""}`} onClick={() => { setListPage("filmler"); setSearchResults(null); setMenuOpen(false); }}>Filmler</button>
+                    <button className={`nav_link ${listPage === "diziler" ? "nav_link--active" : ""}`} onClick={() => handleShowList("diziler")}>Diziler</button>
+                    <button className={`nav_link ${listPage === "filmler" ? "nav_link--active" : ""}`} onClick={() => handleShowList("filmler")}>Filmler</button>
                 </div>
-                <SearchBar onResults={(r) => { setSearchResults(r); setListPage(null); setMenuOpen(false); }} />
+                <SearchBar onResults={handleShowSearchResults} />
             </nav>
-
-            {selectedContent && (
-                <DetailModal
-                    content={selectedContent}
-                    onClose={() => { setSelectedContent(null); setCwRefresh(c => c + 1); }}
-                />
-            )}
 
             {listPage ? (
                 <ListPage
                     type={listPage}
-                    onSelect={setSelectedContent}
+                    onSelect={handleSelectContent}
                     onBack={handleBack}
                 />
             ) : searchResults ? (
                 <SearchResults
                     results={searchResults}
-                    onSelect={setSelectedContent}
-                    onClear={() => setSearchResults(null)}
+                    onSelect={handleSelectContent}
+                    onClear={handleClearSearch}
                 />
             ) : (
                 <>
-                    <Banner onSelect={setSelectedContent} />
-                    <ContinueWatchingRow onSelect={setSelectedContent} refreshKey={cwRefresh} />
-                    <Row title="Kesfet" isHomepage onSelect={setSelectedContent} onNavigate={setListPage} />
+                    <Banner onSelect={handleSelectContent} />
+                    <ContinueWatchingRow onSelect={handleSelectContent} refreshKey={cwRefresh} />
+                    <Row title="Kesfet" isHomepage onSelect={handleSelectContent} onNavigate={handleShowList} />
                 </>
             )}
         </div>

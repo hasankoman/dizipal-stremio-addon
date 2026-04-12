@@ -13,6 +13,37 @@
   padding: 20px;
 }
 
+.detail-route {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  display: block;
+  min-height: 100dvh;
+  padding: 0 0 48px;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(255, 0, 0, 0.18), transparent 28%),
+    radial-gradient(circle at 88% 16%, rgba(255, 229, 0, 0.08), transparent 18%),
+    linear-gradient(180deg, #0a0a0a 0%, #050505 100%);
+}
+
+.detail-route::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 92%);
+  opacity: 0.45;
+}
+
 /* ── MODAL ── */
 .modal {
   background: var(--bg);
@@ -36,6 +67,19 @@
 
 .modal::-webkit-scrollbar-thumb {
   background: var(--accent);
+}
+
+.detail-route .modal {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
 }
 
 /* ── CLOSE BUTTON ── */
@@ -1015,9 +1059,359 @@
   border-top: var(--border-width) solid var(--white);
 }
 
+/* ── ROUTE PAGE LAYOUT ── */
+.detail-route .modal_banner {
+  --detail-banner-media-y: 0px;
+  --detail-banner-overlay-y: 0px;
+  position: relative;
+  top: auto;
+  border-bottom: none;
+  isolation: isolate;
+}
+
+.detail-route .modal_banner_bg,
+.detail-route .modal_banner_trailer {
+  position: relative;
+  z-index: 0;
+  height: clamp(340px, 62vh, 760px);
+}
+
+.detail-route .modal_banner_bg {
+  transform: translate3d(0, var(--detail-banner-media-y), 0) scale(1.08);
+  transform-origin: center top;
+  will-change: transform;
+  transition: transform 120ms linear;
+}
+
+.detail-route .modal_banner_trailer {
+  transform: none;
+  will-change: auto;
+  transition: none;
+}
+
+.detail-route .modal_banner_overlay {
+  z-index: 2;
+  padding: clamp(20px, 4vw, 36px) clamp(16px, 4vw, 56px) clamp(28px, 5vw, 44px);
+  background: none;
+  transform: translate3d(0, var(--detail-banner-overlay-y), 0);
+  will-change: transform;
+  transition: transform 120ms linear;
+}
+
+.detail-route .modal_banner_meta {
+  max-width: min(1040px, 100%);
+  gap: 12px;
+}
+
+.detail-route .modal_close {
+  top: clamp(16px, 3vw, 28px);
+  right: clamp(16px, 3vw, 28px);
+  z-index: 3;
+  width: 48px;
+  height: 48px;
+  background: rgba(10, 10, 10, 0.84);
+  backdrop-filter: blur(12px);
+  box-shadow: 4px 4px 0 rgba(255, 0, 0, 0.45);
+}
+
+.detail-route .modal_info {
+  width: min(1240px, calc(100% - clamp(24px, 7vw, 88px)));
+  margin: -88px auto 0;
+  padding: clamp(22px, 3.6vw, 42px);
+  border: var(--border-width) solid var(--white);
+  background: linear-gradient(180deg, rgba(17, 17, 17, 0.96) 0%, rgba(10, 10, 10, 0.985) 100%);
+  box-shadow: 10px 10px 0 rgba(255, 0, 0, 0.65);
+  position: relative;
+  z-index: 3;
+}
+
+.detail-route .detail-route_info--after-media {
+  margin-top: 20px;
+}
+
+.detail-route .modal_title {
+  font-size: clamp(2rem, 5vw, 4.8rem);
+  line-height: 0.94;
+  letter-spacing: clamp(1px, 0.26vw, 4px);
+  margin-bottom: 16px;
+  max-width: 14ch;
+}
+
+.detail-route .modal_meta_row {
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.detail-route .modal_genres {
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.detail-route .modal_genre_tag {
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #d5d5d5;
+}
+
+.detail-route .modal_info .modal_description {
+  max-width: 78ch;
+  font-size: clamp(1rem, 1.35vw, 1.08rem);
+  line-height: 1.72;
+  color: #cfcfcf;
+}
+
+.detail-route .modal_cast_section {
+  margin-top: 18px;
+}
+
+.detail-route .modal_cast_list {
+  gap: 14px;
+  padding: 4px 2px 10px;
+}
+
+.detail-route .modal_cast_card {
+  min-width: 108px;
+  max-width: 108px;
+}
+
+.detail-route .modal_cast_photo {
+  width: 88px;
+  height: 88px;
+}
+
+.detail-route .modal_director {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 14px;
+}
+
+.detail-route .modal_actions,
+.detail-route .modal_episodes,
+.detail-route .modal_loading,
+.detail-route .modal_player_page {
+  width: min(1240px, calc(100% - clamp(24px, 7vw, 88px)));
+  margin: 20px auto 0;
+  border: var(--border-width) solid var(--white);
+  background: linear-gradient(180deg, rgba(17, 17, 17, 0.96) 0%, rgba(10, 10, 10, 0.985) 100%);
+  box-shadow: 10px 10px 0 rgba(255, 0, 0, 0.5);
+}
+
+.detail-route .modal_actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.72fr);
+  gap: 12px;
+  align-items: stretch;
+  padding: clamp(18px, 3vw, 28px);
+}
+
+.detail-route .modal_play_main,
+.detail-route .modal_download_btn {
+  min-height: 60px;
+  margin-top: 0;
+}
+
+.detail-route .modal_episodes {
+  padding: clamp(18px, 3vw, 30px);
+}
+
+.detail-route .season_tabs {
+  gap: 8px;
+  margin-bottom: 22px;
+  overflow: visible;
+  padding-bottom: 0;
+  border-bottom: none;
+  flex-wrap: wrap;
+}
+
+.detail-route .season_tab {
+  border-bottom: var(--border-width) solid var(--border-muted);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.detail-route .modal_episode_row {
+  border: var(--border-width) solid var(--border-muted);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.detail-route .modal_episode_row + .modal_episode_row {
+  margin-top: 10px;
+}
+
+.detail-route .modal_episode_btn {
+  min-height: 84px;
+  padding: 18px 20px;
+  border: none;
+  background: transparent;
+}
+
+.detail-route .modal_episode_btn:first-child {
+  border-top: none;
+}
+
+.detail-route .modal_episode_btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: transparent;
+}
+
+.detail-route .modal_ep_download {
+  width: 58px;
+  border: none;
+  border-left: var(--border-width) solid var(--border-muted);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.detail-route .modal_episode_row:first-child .modal_ep_download {
+  border-top: none;
+}
+
+.detail-route .ep_number {
+  width: 44px;
+  height: 44px;
+  font-size: 16px;
+}
+
+.detail-route .ep_title {
+  white-space: normal;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.detail-route .modal_player_page {
+  overflow: hidden;
+}
+
+.detail-route .modal_player {
+  border-bottom: var(--border-width) solid var(--white);
+}
+
+.detail-route .modal_video {
+  aspect-ratio: 16 / 9;
+  max-height: none;
+  object-fit: contain;
+}
+
+.detail-route .modal_embed {
+  min-height: min(72vh, 900px);
+}
+
+.detail-route .modal_ep_nav {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+@media (max-width: 900px) {
+  .detail-route .modal_actions {
+    grid-template-columns: 1fr;
+  }
+  .detail-route .season_tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .detail-route .modal_ep_nav {
+    grid-template-columns: 1fr;
+  }
+  .detail-route .modal_ep_nav_info {
+    justify-content: center;
+    border-left: none;
+    border-right: none;
+    border-top: var(--border-width) solid var(--white);
+    border-bottom: var(--border-width) solid var(--white);
+  }
+}
+
 @media (max-width: 600px) {
+  .detail-route {
+    padding: 0 0 28px;
+  }
+  .detail-route::before {
+    background-size: 24px 24px;
+    opacity: 0.28;
+  }
   .modal {
     box-shadow: 4px 4px 0px var(--accent);
+  }
+  .detail-route .modal_banner_bg,
+  .detail-route .modal_banner_trailer {
+    height: min(48vh, 320px);
+  }
+  .detail-route .modal_banner_overlay {
+    padding: 18px 14px 20px;
+  }
+  .detail-route .modal_banner_meta {
+    gap: 8px;
+  }
+  .detail-route .modal_close {
+    top: 12px;
+    right: 12px;
+    width: 44px;
+    height: 44px;
+    box-shadow: 3px 3px 0 rgba(255, 0, 0, 0.42);
+  }
+  .detail-route .modal_info,
+  .detail-route .modal_actions,
+  .detail-route .modal_episodes,
+  .detail-route .modal_loading,
+  .detail-route .modal_player_page {
+    width: calc(100% - 24px);
+    box-shadow: 6px 6px 0 rgba(255, 0, 0, 0.42);
+  }
+  .detail-route .modal_info {
+    margin-top: -36px;
+    padding: 18px 16px 20px;
+  }
+  .detail-route .detail-route_info--after-media {
+    margin-top: 16px;
+  }
+  .detail-route .modal_title {
+    max-width: none;
+    font-size: clamp(1.7rem, 9vw, 2.6rem);
+    line-height: 0.96;
+  }
+  .detail-route .modal_actions {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+  .detail-route .modal_play_main,
+  .detail-route .modal_download_btn {
+    min-height: 56px;
+    font-size: 14px;
+    letter-spacing: 3px;
+  }
+  .detail-route .season_tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .detail-route .modal_episode_btn {
+    min-height: 70px;
+    padding: 14px 14px 14px 12px;
+    gap: 12px;
+  }
+  .detail-route .modal_ep_download {
+    width: 48px;
+  }
+  .detail-route .ep_number {
+    width: 36px;
+    height: 36px;
+    font-size: 13px;
+  }
+  .detail-route .ep_title {
+    font-size: 13px;
+  }
+  .detail-route .modal_cast_card {
+    min-width: 88px;
+    max-width: 88px;
+  }
+  .detail-route .modal_cast_photo {
+    width: 72px;
+    height: 72px;
+  }
+  .detail-route .modal_embed {
+    min-height: 42vh;
   }
   .modal_banner_bg {
     height: 200px;
@@ -1038,5 +1432,14 @@
   .season_tab {
     padding: 8px 16px;
     font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-route .modal_banner_bg,
+  .detail-route .modal_banner_trailer,
+  .detail-route .modal_banner_overlay {
+    transform: none;
+    transition: none;
   }
 }

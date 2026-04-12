@@ -5,7 +5,7 @@ import "./DetailModal.css";
 import { getWatchProgress, saveWatchProgress, formatTime } from "./watchHistory";
 import DownloadPage from "./DownloadPage";
 
-function DetailModal({ content, onClose }) {
+function DetailModal({ content, onClose, pageMode = false }) {
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
     const [streamLoading, setStreamLoading] = useState(false);
@@ -22,15 +22,95 @@ function DetailModal({ content, onClose }) {
     const [downloadInfo, setDownloadInfo] = useState(null);
     const videoRef = useRef(null);
     const hlsRef = useRef(null);
+    const bannerRef = useRef(null);
     const playingPathRef = useRef(null);
     const contentInfoRef = useRef({});
     const cleanupListenersRef = useRef(null);
     const nextEpisodeIdRef = useRef(null);
 
     useEffect(() => {
+        if (pageMode) return undefined;
+
+        const previousOverflow = document.body.style.overflow;
         document.body.style.overflow = "hidden";
-        return () => { document.body.style.overflow = ""; };
-    }, []);
+
+        return () => {
+            document.body.style.overflow = previousOverflow;
+        };
+    }, [pageMode]);
+
+    useEffect(() => {
+        if (!pageMode) return;
+        window.scrollTo({ top: 0, behavior: "auto" });
+    }, [pageMode]);
+
+    useEffect(() => {
+        if (!pageMode || typeof window === "undefined") return undefined;
+
+        const bannerNode = bannerRef.current;
+        if (!bannerNode) return undefined;
+
+        const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+        let frameId = null;
+
+        const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+        const applyParallax = () => {
+            frameId = null;
+
+            if (motionQuery.matches) {
+                bannerNode.style.setProperty("--detail-banner-media-y", "0px");
+                bannerNode.style.setProperty("--detail-banner-overlay-y", "0px");
+                return;
+            }
+
+            const rect = bannerNode.getBoundingClientRect();
+            const maxMediaOffset = window.innerWidth < 768 ? 42 : 88;
+            const maxOverlayOffset = window.innerWidth < 768 ? 18 : 34;
+            const mediaOffset = clamp(rect.top * -0.12, -18, maxMediaOffset);
+            const overlayOffset = clamp(rect.top * -0.055, -8, maxOverlayOffset);
+
+            bannerNode.style.setProperty("--detail-banner-media-y", `${mediaOffset.toFixed(1)}px`);
+            bannerNode.style.setProperty("--detail-banner-overlay-y", `${overlayOffset.toFixed(1)}px`);
+        };
+
+        const requestParallax = () => {
+            if (frameId !== null) return;
+            frameId = window.requestAnimationFrame(applyParallax);
+        };
+
+        const handleMotionChange = () => {
+            requestParallax();
+        };
+
+        requestParallax();
+        window.addEventListener("scroll", requestParallax, { passive: true });
+        window.addEventListener("resize", requestParallax);
+
+        if (motionQuery.addEventListener) {
+            motionQuery.addEventListener("change", handleMotionChange);
+        } else {
+            motionQuery.addListener(handleMotionChange);
+        }
+
+        return () => {
+            if (frameId !== null) {
+                window.cancelAnimationFrame(frameId);
+            }
+
+            window.removeEventListener("scroll", requestParallax);
+            window.removeEventListener("resize", requestParallax);
+
+            if (motionQuery.removeEventListener) {
+                motionQuery.removeEventListener("change", handleMotionChange);
+            } else {
+                motionQuery.removeListener(handleMotionChange);
+            }
+
+            bannerNode.style.removeProperty("--detail-banner-media-y");
+            bannerNode.style.removeProperty("--detail-banner-overlay-y");
+        };
+    }, [pageMode, content.id]);
 
     // Parse bolum path: /bolum/for-all-mankind-5-sezon-3-bolum → /dizi/for-all-mankind, season 5
     const parsedBolum = useMemo(() => {
@@ -46,8 +126,8 @@ function DetailModal({ content, onClose }) {
     useEffect(() => {
         contentInfoRef.current = {
             ...contentInfoRef.current,
-            title: detail?.meta?.name || content.title,
-            poster: content.poster,
+            title: detail?.meta?.name || content.title || contentInfoRef.current.title,
+            poster: content.poster || detail?.meta?.poster || detail?.meta?.background || contentInfoRef.current.poster,
             parentId: resolvedId,
         };
     }, [detail, content, resolvedId]);
@@ -384,6 +464,10 @@ function DetailModal({ content, onClose }) {
     const movieHasProgress = movieProgress && movieProgress.duration > 0 &&
         (movieProgress.currentTime / movieProgress.duration) > 0.02 &&
         (movieProgress.currentTime / movieProgress.duration) < 0.95;
+    const overlayClassName = pageMode ? "modal-overlay detail-route" : "modal-overlay";
+    const modalClassName = pageMode ? "modal detail-route_modal" : "modal";
+    const infoClassName = pageMode && trailerUrl ? "modal_info detail-route_info--after-media" : "modal_info";
+    const bannerBackground = detail?.meta?.background || detail?.meta?.poster || content.poster;
 
     return (
         <>
@@ -394,8 +478,8 @@ function DetailModal({ content, onClose }) {
                 onClose={() => setDownloadInfo(null)}
             />
         )}
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className={overlayClassName} onClick={pageMode ? undefined : onClose}>
+            <div className={modalClassName} onClick={pageMode ? undefined : (e) => e.stopPropagation()}>
                 {playing && streamUrl ? (
                     <div className="modal_player_page">
                         <div className="modal_player">
@@ -528,7 +612,7 @@ function DetailModal({ content, onClose }) {
                     </div>
                 ) : (
                     <>
-                        <div className="modal_banner">
+                        <div className="modal_banner" ref={pageMode ? bannerRef : undefined}>
                             {trailerUrl ? (
                                 <iframe
                                     src={trailerUrl}
@@ -542,9 +626,7 @@ function DetailModal({ content, onClose }) {
                                 <div
                                     className="modal_banner_bg"
                                     style={{
-                                        backgroundImage: detail?.meta?.background
-                                            ? `url(${detail.meta.background})`
-                                            : `url(${content.poster})`,
+                                        backgroundImage: bannerBackground ? `url(${bannerBackground})` : undefined,
                                     }}
                                 />
                             )}
@@ -577,7 +659,7 @@ function DetailModal({ content, onClose }) {
                             )}
                         </div>
 
-                        <div className="modal_info">
+                        <div className={infoClassName}>
                             <h1 className="modal_title">
                                 {detail?.meta?.name || content.title}
                             </h1>
