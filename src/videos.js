@@ -229,6 +229,41 @@ async function ScrapeVideoUrl(scrapeUrl, customReferer) {
                 }
             });
 
+            // Method 3: JWPlayer setup pattern
+            var setupMatch = html.match(/jwplayer\(.*?\)\.setup\(([\s\S]*?)\);/);
+            if (setupMatch) {
+                var setupStr = setupMatch[1];
+                if (!playerFileLink) {
+                    var fileMatch = setupStr.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/);
+                    if (fileMatch) playerFileLink = fileMatch[1];
+                }
+                var tracksMatch = setupStr.match(/tracks\s*:\s*\[([\s\S]*?)\]/);
+                if (tracksMatch) {
+                    var tracksStr = tracksMatch[1];
+                    var itemRegex = /\{[\s\S]*?\}/g;
+                    var itemMatches = tracksStr.match(itemRegex);
+                    if (itemMatches) {
+                        var extractedSubs = [];
+                        itemMatches.forEach(itemStr => {
+                            var tf = itemStr.match(/file\s*:\s*["']([^"']+)["']/);
+                            var tl = itemStr.match(/label\s*:\s*["']([^"']+)["']/);
+                            var tk = itemStr.match(/kind\s*:\s*["']([^"']+)["']/);
+                            var td = /default\s*:\s*true/i.test(itemStr);
+                            
+                            if (tf && tk && tk[1] === 'captions') {
+                                extractedSubs.push({
+                                    url: tf[1],
+                                    lang: tl ? tl[1].substring(0, 2).toLowerCase() : 'tr',
+                                    label: tl ? tl[1] : 'Subtitle',
+                                    default: td
+                                });
+                            }
+                        });
+                        if (extractedSubs.length > 0) subtitles = extractedSubs;
+                    }
+                }
+            }
+
             if (playerFileLink) {
                 return {
                     url: playerFileLink,

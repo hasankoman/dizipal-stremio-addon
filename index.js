@@ -738,7 +738,27 @@ app.get("/api/stream/:path(*)", async (req, res) => {
             var encodedUrl = Buffer.from(video.url).toString('base64url');
             var encodedReferer = Buffer.from(video.referer || process.env.PROXY_URL + "/").toString('base64url');
             var proxyUrl = `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encodedUrl}`;
-            return respond(res, { url: proxyUrl, directUrl: video.url, referer: video.referer });
+            
+            var proxySubs = [];
+            if (video.subtitles && Array.isArray(video.subtitles)) {
+                proxySubs = video.subtitles.map(sub => {
+                    if (typeof sub === 'string') {
+                        var match = sub.match(/\[(.+?)\](.+)/);
+                        var label = match ? match[1] : 'Subtitle';
+                        var url = match ? match[2] : sub;
+                        var encodedSubUrl = Buffer.from(url).toString('base64url');
+                        var proxySubUrl = `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encodedSubUrl}`;
+                        return { label: label, url: proxySubUrl, lang: label.substring(0, 2).toLowerCase() };
+                    } else if (typeof sub === 'object') {
+                        var encodedSubUrl = Buffer.from(sub.url).toString('base64url');
+                        var proxySubUrl = `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encodedSubUrl}`;
+                        return { label: sub.label, url: proxySubUrl, lang: sub.lang, default: sub.default };
+                    }
+                    return null;
+                }).filter(Boolean);
+            }
+            
+            return respond(res, { url: proxyUrl, directUrl: video.url, referer: video.referer, subtitles: proxySubs });
         }
         return respond(res, { url: null });
     } catch (error) {

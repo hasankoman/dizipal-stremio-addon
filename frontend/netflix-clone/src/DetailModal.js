@@ -22,6 +22,8 @@ function DetailModal({ content, onClose, pageMode = false }) {
     const [downloadInfo, setDownloadInfo] = useState(null);
     const videoRef = useRef(null);
     const hlsRef = useRef(null);
+    const [audioTracks, setAudioTracks] = useState([]);
+    const [currentAudio, setCurrentAudio] = useState(null);
     const bannerRef = useRef(null);
     const playingPathRef = useRef(null);
     const contentInfoRef = useRef({});
@@ -284,8 +286,21 @@ function DetailModal({ content, onClose, pageMode = false }) {
             hls.loadSource(url);
             hls.attachMedia(video);
             hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                if (hls.audioTracks && hls.audioTracks.length > 1) {
+                    setAudioTracks(hls.audioTracks);
+                    setCurrentAudio(hls.audioTrack);
+                } else {
+                    setAudioTracks([]);
+                }
                 resumePosition();
                 video.play().catch((e) => console.error("[initPlayer] play() error:", e));
+            });
+            hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
+                setAudioTracks(data.audioTracks || []);
+                setCurrentAudio(hls.audioTrack);
+            });
+            hls.on(window.Hls.Events.AUDIO_TRACK_SWITCHED, (event, data) => {
+                setCurrentAudio(data.id);
             });
             hls.on(window.Hls.Events.ERROR, (event, data) => {
                 console.error("[initPlayer] HLS ERROR:", data);
@@ -364,18 +379,20 @@ function DetailModal({ content, onClose, pageMode = false }) {
         setPlayerError(null);
         setStreamUrl(null);
         setPlaying(false);
+        setAudioTracks([]);
+        setCurrentAudio(null);
         try {
             const res = await axios.get(requests.stream(path));
             if (res.data && res.data.url) {
                 const proxyUrl = res.data.url;
                 const infuseUrl = `infuse://x-callback-url/play?url=${encodeURIComponent(proxyUrl)}`;
                 const vlcUrl = `vlc://${proxyUrl}`;
-                const urls = { proxy: proxyUrl, infuse: infuseUrl, vlc: vlcUrl, direct: proxyUrl };
+                const urls = { proxy: proxyUrl, infuse: infuseUrl, vlc: vlcUrl, direct: proxyUrl, subtitles: res.data.subtitles || [] };
                 await loadHlsScript();
                 setStreamUrl(urls);
                 setPlaying(true);
             } else if (res.data && res.data.embedUrl) {
-                setStreamUrl({ embed: res.data.embedUrl, sources: res.data.sources || null });
+                setStreamUrl({ embed: res.data.embedUrl, sources: res.data.sources || null, subtitles: res.data.subtitles || [] });
                 setPlaying(true);
             } else {
                 setPlayerError("Stream URL bulunamadi.");
@@ -498,9 +515,51 @@ function DetailModal({ content, onClose, pageMode = false }) {
                                     controls
                                     autoPlay
                                     playsInline
+                                    crossOrigin="anonymous"
                                     className="modal_video"
-                                />
+                                >
+                                    {streamUrl.subtitles && streamUrl.subtitles.map((sub, idx) => (
+                                        <track 
+                                            key={idx} 
+                                            src={sub.url} 
+                                            kind="subtitles" 
+                                            srcLang={sub.lang} 
+                                            label={sub.label} 
+                                            default={sub.default} 
+                                        />
+                                    ))}
+                                </video>
                             )}
+                            
+                            {/* Audio tracks selector */}
+                            {audioTracks.length > 1 && (
+                                <div className="modal_audio_selector" style={{ position: 'absolute', top: 15, right: 15, zIndex: 100, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {audioTracks.map((track, i) => {
+                                        const name = track.name || track.lang || `Ses ${i+1}`;
+                                        let label = name;
+                                        const lName = name.toLowerCase();
+                                        if (lName.includes('tur') || lName.includes('tr')) label = 'TR Dublaj';
+                                        else if (lName.includes('eng') || lName.includes('en')) label = 'Orijinal (Ses)';
+
+                                        return (
+                                            <button 
+                                                key={i} 
+                                                className="modal_audio_btn" 
+                                                style={{ padding: '8px 16px', background: currentAudio === i || currentAudio === track.id ? '#e50914' : 'rgba(0,0,0,0.6)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}
+                                                onClick={() => {
+                                                    if (hlsRef.current) {
+                                                        hlsRef.current.audioTrack = track.id !== undefined ? track.id : i;
+                                                        setCurrentAudio(track.id !== undefined ? track.id : i);
+                                                    }
+                                                }}
+                                            >
+                                                {label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
                             {playerError && (
                                 <div className="modal_player_error">{playerError}</div>
                             )}
