@@ -6,11 +6,14 @@ import SearchResults from "./SearchResults";
 import DetailModal from "./DetailModal";
 import ListPage from "./ListPage";
 import ContinueWatchingRow from "./ContinueWatchingRow";
+import WatchLaterRow from "./WatchLaterRow";
+import WatchLaterPage from "./WatchLaterPage";
 import "./App.css";
 
 const APP_BASE = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
 const HOME_PATH = APP_BASE || "/";
 const DETAIL_PATH = `${APP_BASE}/detail`;
+const WATCH_LATER_PATH = `${APP_BASE}/watch-later`;
 
 function normalizePathname(pathname) {
     const normalized = pathname.replace(/\/+$/, "");
@@ -28,6 +31,10 @@ function buildDetailUrl(content) {
 }
 
 function readRouteFromLocation(location = window.location, state = window.history.state) {
+    if (normalizePathname(location.pathname) === normalizePathname(WATCH_LATER_PATH)) {
+        return { page: "watchLater", content: null };
+    }
+
     if (normalizePathname(location.pathname) !== normalizePathname(DETAIL_PATH)) {
         return { page: "home", content: null };
     }
@@ -58,6 +65,7 @@ function App() {
     const [listPage, setListPage] = useState(null); // "diziler" or "filmler"
     const [menuOpen, setMenuOpen] = useState(false);
     const [cwRefresh, setCwRefresh] = useState(0);
+    const [watchLaterRefresh, setWatchLaterRefresh] = useState(0);
     const [route, setRoute] = useState(() => readRouteFromLocation());
     const previousRouteRef = useRef(route.page);
 
@@ -76,6 +84,23 @@ function App() {
         }
 
         setRoute({ page: "home", content: null });
+    }, []);
+
+    const navigateWatchLater = useCallback(({ replace = false } = {}) => {
+        const isAlreadyWatchLater =
+            normalizePathname(window.location.pathname) === normalizePathname(WATCH_LATER_PATH) &&
+            !window.location.search &&
+            !window.location.hash;
+
+        if (!isAlreadyWatchLater) {
+            window.history[replace ? "replaceState" : "pushState"](
+                { page: "watchLater" },
+                "",
+                WATCH_LATER_PATH
+            );
+        }
+
+        setRoute({ page: "watchLater", content: null });
     }, []);
 
     const handleSelectContent = useCallback((content) => {
@@ -101,8 +126,15 @@ function App() {
 
     useEffect(() => {
         if (!window.history.state?.page) {
+            const initialState =
+                route.page === "detail"
+                    ? { page: "detail", content: route.content }
+                    : route.page === "watchLater"
+                        ? { page: "watchLater" }
+                        : { page: "home" };
+
             window.history.replaceState(
-                route.page === "detail" ? { page: "detail", content: route.content } : { page: "home" },
+                initialState,
                 "",
                 window.location.pathname + window.location.search + window.location.hash
             );
@@ -122,30 +154,42 @@ function App() {
 
         if (previousRouteRef.current === "detail" && route.page !== "detail") {
             setCwRefresh((current) => current + 1);
+            setWatchLaterRefresh((current) => current + 1);
         }
 
         previousRouteRef.current = route.page;
     }, [route.page]);
 
     function handleShowHome() {
+        setMenuOpen(false);
         setListPage(null);
         setSearchResults(null);
         navigateHome();
     }
 
     function handleShowList(type) {
+        setMenuOpen(false);
         setListPage(type);
         setSearchResults(null);
         navigateHome();
     }
 
+    function handleShowWatchLater() {
+        setMenuOpen(false);
+        setListPage(null);
+        setSearchResults(null);
+        navigateWatchLater();
+    }
+
     function handleShowSearchResults(results) {
+        setMenuOpen(false);
         setSearchResults(results);
         setListPage(null);
         navigateHome();
     }
 
     function handleClearSearch() {
+        setMenuOpen(false);
         setSearchResults(null);
         navigateHome();
     }
@@ -156,6 +200,7 @@ function App() {
                 key={`${route.content.id}:${route.content.autoPlay ? "auto" : "manual"}`}
                 content={route.content}
                 onClose={handleCloseDetail}
+                onWatchLaterChange={() => setWatchLaterRefresh((current) => current + 1)}
                 pageMode
             />
         );
@@ -178,11 +223,18 @@ function App() {
                 <div className="nav_links">
                     <button className={`nav_link ${listPage === "diziler" ? "nav_link--active" : ""}`} onClick={() => handleShowList("diziler")}>Diziler</button>
                     <button className={`nav_link ${listPage === "filmler" ? "nav_link--active" : ""}`} onClick={() => handleShowList("filmler")}>Filmler</button>
+                    <button className={`nav_link ${route.page === "watchLater" ? "nav_link--active" : ""}`} onClick={handleShowWatchLater}>Daha Sonra Izle</button>
                 </div>
                 <SearchBar onResults={handleShowSearchResults} />
             </nav>
 
-            {listPage ? (
+            {route.page === "watchLater" ? (
+                <WatchLaterPage
+                    onSelect={handleSelectContent}
+                    onBack={handleShowHome}
+                    refreshKey={watchLaterRefresh}
+                />
+            ) : listPage ? (
                 <ListPage
                     type={listPage}
                     onSelect={handleSelectContent}
@@ -198,6 +250,11 @@ function App() {
                 <>
                     <Banner onSelect={handleSelectContent} />
                     <ContinueWatchingRow onSelect={handleSelectContent} refreshKey={cwRefresh} />
+                    <WatchLaterRow
+                        onSelect={handleSelectContent}
+                        onNavigate={handleShowWatchLater}
+                        refreshKey={watchLaterRefresh}
+                    />
                     <Row title="Kesfet" isHomepage onSelect={handleSelectContent} onNavigate={handleShowList} />
                 </>
             )}

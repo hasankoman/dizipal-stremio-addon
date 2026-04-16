@@ -3,9 +3,10 @@ import axios from "./axios";
 import requests from "./requests";
 import "./DetailModal.css";
 import { getWatchProgress, saveWatchProgress, formatTime } from "./watchHistory";
+import { isInWatchLater, toggleWatchLaterItem } from "./watchLater";
 import DownloadPage from "./DownloadPage";
 
-function DetailModal({ content, onClose, pageMode = false }) {
+function DetailModal({ content, onClose, onWatchLaterChange, pageMode = false }) {
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
     const [streamLoading, setStreamLoading] = useState(false);
@@ -20,6 +21,7 @@ function DetailModal({ content, onClose, pageMode = false }) {
     const [showNextPrompt, setShowNextPrompt] = useState(false);
     const [nextCountdown, setNextCountdown] = useState(0);
     const [downloadInfo, setDownloadInfo] = useState(null);
+    const [watchLaterActive, setWatchLaterActive] = useState(false);
     const videoRef = useRef(null);
     const hlsRef = useRef(null);
     const [audioTracks, setAudioTracks] = useState([]);
@@ -124,6 +126,18 @@ function DetailModal({ content, onClose, pageMode = false }) {
     }, [content.id]);
 
     const resolvedId = parsedBolum ? parsedBolum.diziId : content.id;
+    const type = parsedBolum ? "series" : (content.type || (content.id?.includes("/dizi/") || content.id?.includes(":series:") ? "series" : "movie"));
+    const watchLaterItem = useMemo(() => ({
+        id: resolvedId,
+        title: detail?.meta?.name || content.title || "",
+        poster: detail?.meta?.poster || detail?.meta?.background || content.poster || "",
+        type,
+        year: tmdb?.releaseDate ? tmdb.releaseDate.substring(0, 4) : detail?.meta?.releaseInfo || "",
+    }), [resolvedId, detail, content, type, tmdb]);
+
+    useEffect(() => {
+        setWatchLaterActive(isInWatchLater(resolvedId));
+    }, [resolvedId]);
 
     useEffect(() => {
         contentInfoRef.current = {
@@ -430,8 +444,6 @@ function DetailModal({ content, onClose, pageMode = false }) {
         setPlayerError(null);
     }
 
-    const type = parsedBolum ? "series" : (content.type || (content.id?.includes("/dizi/") || content.id?.includes(":series:") ? "series" : "movie"));
-
     const currentEpisodeNav = useMemo(() => {
         if (!playingEpisodeId || !detail?.episodes?.length) return { prev: null, next: null, current: null };
         const allEpisodes = [...detail.episodes].sort((a, b) => {
@@ -477,6 +489,14 @@ function DetailModal({ content, onClose, pageMode = false }) {
         setDownloadInfo({ path, title: title || contentInfoRef.current.title });
     }
 
+    const handleToggleWatchLater = useCallback(() => {
+        const nextState = toggleWatchLaterItem(watchLaterItem);
+        setWatchLaterActive(nextState);
+        if (onWatchLaterChange) {
+            onWatchLaterChange();
+        }
+    }, [watchLaterItem, onWatchLaterChange]);
+
     const movieProgress = type === "movie" ? getWatchProgress(content.id) : null;
     const movieHasProgress = movieProgress && movieProgress.duration > 0 &&
         (movieProgress.currentTime / movieProgress.duration) > 0.02 &&
@@ -499,6 +519,64 @@ function DetailModal({ content, onClose, pageMode = false }) {
             <div className={modalClassName} onClick={pageMode ? undefined : (e) => e.stopPropagation()}>
                 {playing && streamUrl ? (
                     <div className="modal_player_page">
+                        <div className="modal_top_controls_box">
+                            <button
+                                className={`modal_back_btn modal_back_btn_in_topbar${streamUrl.embed?.includes("multiembed") ? " modal_back_btn_multi" : ""}`}
+                                onClick={handleStopPlaying}
+                                aria-label="Geri"
+                            >
+                                <svg
+                                    width="16"
+                                    height="16"
+                                    viewBox="0 0 16 16"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="3"
+                                    strokeLinecap="square"
+                                >
+                                    <line x1="14" y1="8" x2="2" y2="8" />
+                                    <polyline points="7,2 2,8 7,14" />
+                                </svg>
+                            </button>
+
+                            {audioTracks.length > 1 && (
+                                <div className="modal_audio_selector_row">
+                                    {audioTracks.map((track, i) => {
+                                        const name = track.name || track.lang || `Ses ${i+1}`
+                                        let label = name
+                                        const lName = name.toLowerCase()
+                                        if (lName.includes('tur') || lName.includes('tr')) label = 'TR Dublaj'
+                                        else if (lName.includes('eng') || lName.includes('en')) label = 'Orijinal (Ses)'
+
+                                        return (
+                                            <button
+                                                key={i}
+                                                className="modal_audio_btn"
+                                                style={{
+                                                    padding: '8px 16px',
+                                                    background: currentAudio === i || currentAudio === track.id ? '#e50914' : 'rgba(0,0,0,0.6)',
+                                                    color: '#fff',
+                                                    border: '1px solid rgba(255,255,255,0.2)',
+                                                    borderRadius: '4px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '13px',
+                                                    fontWeight: 'bold',
+                                                }}
+                                                onClick={() => {
+                                                    if (hlsRef.current) {
+                                                        hlsRef.current.audioTrack = track.id !== undefined ? track.id : i
+                                                        setCurrentAudio(track.id !== undefined ? track.id : i)
+                                                    }
+                                                }}
+                                            >
+                                                {label}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
                         <div className="modal_player">
                             {streamUrl.embed ? (
                                 <iframe
@@ -530,91 +608,59 @@ function DetailModal({ content, onClose, pageMode = false }) {
                                     ))}
                                 </video>
                             )}
-                            
-                            {/* Audio tracks selector */}
-                            {audioTracks.length > 1 && (
-                                <div className="modal_audio_selector" style={{ position: 'absolute', top: 15, right: 15, zIndex: 100, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    {audioTracks.map((track, i) => {
-                                        const name = track.name || track.lang || `Ses ${i+1}`;
-                                        let label = name;
-                                        const lName = name.toLowerCase();
-                                        if (lName.includes('tur') || lName.includes('tr')) label = 'TR Dublaj';
-                                        else if (lName.includes('eng') || lName.includes('en')) label = 'Orijinal (Ses)';
-
-                                        return (
-                                            <button 
-                                                key={i} 
-                                                className="modal_audio_btn" 
-                                                style={{ padding: '8px 16px', background: currentAudio === i || currentAudio === track.id ? '#e50914' : 'rgba(0,0,0,0.6)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}
-                                                onClick={() => {
-                                                    if (hlsRef.current) {
-                                                        hlsRef.current.audioTrack = track.id !== undefined ? track.id : i;
-                                                        setCurrentAudio(track.id !== undefined ? track.id : i);
-                                                    }
-                                                }}
-                                            >
-                                                {label}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            )}
 
                             {playerError && (
                                 <div className="modal_player_error">{playerError}</div>
                             )}
-                            <button className={`modal_back_btn${streamUrl.embed?.includes("multiembed") ? " modal_back_btn_multi" : ""}`} onClick={handleStopPlaying} aria-label="Geri">
-                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="square"><line x1="14" y1="8" x2="2" y2="8"/><polyline points="7,2 2,8 7,14"/></svg>
-                            </button>
-                            {showNextPrompt && currentEpisodeNav.next && (
-                                <div className="modal_next_overlay">
-                                    <div className="modal_next_box">
-                                        <span className="modal_next_label">Sonraki Bolum</span>
-                                        <span className="modal_next_ep">
-                                            {currentEpisodeNav.next.season}. Sezon {currentEpisodeNav.next.episode}. Bolum
-                                        </span>
-                                        {currentEpisodeNav.next.title && (
-                                            <span className="modal_next_title">{currentEpisodeNav.next.title}</span>
-                                        )}
-                                        <div className="modal_next_countdown_bar">
-                                            <div className="modal_next_countdown_fill" key={showNextPrompt} />
-                                        </div>
-                                        <div className="modal_next_actions">
-                                            <button
-                                                className="modal_next_play"
-                                                onClick={() => { setShowNextPrompt(false); handlePlay(currentEpisodeNav.next.id); }}
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><polygon points="2,0 14,7 2,14"/></svg>
-                                                Sonraki ({nextCountdown})
-                                            </button>
-                                            <button
-                                                className="modal_next_exit"
-                                                onClick={() => {
-                                                    const next = currentEpisodeNav.next;
-                                                    if (next) {
-                                                        saveWatchProgress(next.id, {
-                                                            currentTime: 0,
-                                                            duration: 0,
-                                                            nextUp: true,
-                                                            title: contentInfoRef.current.title,
-                                                            poster: contentInfoRef.current.poster,
-                                                            parentId: contentInfoRef.current.parentId,
-                                                            season: next.season,
-                                                            episode: next.episode,
-                                                        });
-                                                    }
-                                                    setShowNextPrompt(false);
-                                                    handleStopPlaying();
-                                                }}
-                                            >
-                                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>
-                                                Cik
-                                            </button>
-                                        </div>
+                        </div>
+                        {showNextPrompt && currentEpisodeNav.next && (
+                            <div className="modal_next_overlay">
+                                <div className="modal_next_box">
+                                    <span className="modal_next_label">Sonraki Bolum</span>
+                                    <span className="modal_next_ep">
+                                        {currentEpisodeNav.next.season}. Sezon {currentEpisodeNav.next.episode}. Bolum
+                                    </span>
+                                    {currentEpisodeNav.next.title && (
+                                        <span className="modal_next_title">{currentEpisodeNav.next.title}</span>
+                                    )}
+                                    <div className="modal_next_countdown_bar">
+                                        <div className="modal_next_countdown_fill" key={showNextPrompt} />
+                                    </div>
+                                    <div className="modal_next_actions">
+                                        <button
+                                            className="modal_next_play"
+                                            onClick={() => { setShowNextPrompt(false); handlePlay(currentEpisodeNav.next.id); }}
+                                        >
+                                            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><polygon points="2,0 14,7 2,14"/></svg>
+                                            Sonraki ({nextCountdown})
+                                        </button>
+                                        <button
+                                            className="modal_next_exit"
+                                            onClick={() => {
+                                                const next = currentEpisodeNav.next;
+                                                if (next) {
+                                                    saveWatchProgress(next.id, {
+                                                        currentTime: 0,
+                                                        duration: 0,
+                                                        nextUp: true,
+                                                        title: contentInfoRef.current.title,
+                                                        poster: contentInfoRef.current.poster,
+                                                        parentId: contentInfoRef.current.parentId,
+                                                        season: next.season,
+                                                        episode: next.episode,
+                                                    });
+                                                }
+                                                setShowNextPrompt(false);
+                                                handleStopPlaying();
+                                            }}
+                                        >
+                                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>
+                                            Cik
+                                        </button>
                                     </div>
                                 </div>
-                            )}
-                        </div>
+                            </div>
+                        )}
                         {type === "series" && currentEpisodeNav.current && (
                             <div className="modal_ep_nav">
                                 <button
@@ -790,6 +836,15 @@ function DetailModal({ content, onClose, pageMode = false }) {
                                     <span className="modal_cast_names">{tmdb.director.join(", ")}</span>
                                 </div>
                             )}
+                            <div className="modal_library_actions">
+                                <button
+                                    className={`modal_watchlater_btn ${watchLaterActive ? "modal_watchlater_btn--active" : ""}`}
+                                    onClick={handleToggleWatchLater}
+                                    aria-pressed={watchLaterActive}
+                                >
+                                    {watchLaterActive ? "Listeden Kaldir" : "Daha Sonra Izle"}
+                                </button>
+                            </div>
                         </div>
 
                         {loading ? (

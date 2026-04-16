@@ -1,0 +1,73 @@
+.wl_row {
+    margin-top: 12px;
+}
+
+.wl_card {
+    position: relative;
+}
+
+.wl_remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 3;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-muted);
+    background: rgba(0, 0, 0, 0.88);
+    color: var(--white);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.1s, border-color 0.1s;
+}
+
+.wl_card:hover .wl_remove {
+    opacity: 1;
+}
+
+.wl_remove:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.wl_overlay {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 28px 10px 10px;
+    background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.92) 72%);
+    pointer-events: none;
+}
+
+.wl_meta {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--yellow);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+}
+
+.wl_title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    color: var(--white);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+@media (hover: none) {
+    .wl_remove {
+        opacity: 1;
+    }
+}

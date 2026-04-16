@@ -1,0 +1,244 @@
+.watchlater {
+  min-height: 100vh;
+  padding: 84px 24px 40px;
+  color: var(--white);
+  background:
+    radial-gradient(circle at top left, rgba(255, 0, 0, 0.12), transparent 32%),
+    linear-gradient(180deg, rgba(17, 17, 17, 0.96), rgba(10, 10, 10, 1));
+}
+
+.watchlater_header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 18px;
+  margin-bottom: 24px;
+  border-bottom: var(--border-width) solid var(--white);
+}
+
+.watchlater_back {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--white);
+  border: var(--border-width) solid var(--white);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.watchlater_back:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.watchlater_heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.watchlater_title {
+  font-size: clamp(1.6rem, 4vw, 2.5rem);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+}
+
+.watchlater_subtitle {
+  max-width: 640px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.watchlater_grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.watchlater_card {
+  cursor: pointer;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(22, 22, 22, 1) 0%, rgba(12, 12, 12, 1) 100%);
+  border: var(--border-width) solid var(--border-muted);
+  transition: border-color 0.1s, box-shadow 0.1s, transform 0.18s ease-out;
+}
+
+.watchlater_card:hover {
+  transform: translate3d(-2px, -2px, 0);
+  border-color: var(--white);
+  box-shadow: 6px 6px 0 rgba(255, 255, 255, 0.75);
+}
+
+.watchlater_poster_wrap {
+  position: relative;
+}
+
+.watchlater_poster {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  display: block;
+  border-bottom: var(--border-width) solid var(--border-muted);
+}
+
+.watchlater_card:hover .watchlater_poster {
+  border-bottom-color: var(--white);
+}
+
+.watchlater_remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.84);
+  color: var(--white);
+  border: 1px solid var(--border-muted);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.watchlater_remove:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.watchlater_card_body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 14px 16px;
+}
+
+.watchlater_card_meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.watchlater_badge {
+  padding: 4px 8px;
+  background: var(--accent);
+  color: var(--white);
+  border: 1px solid var(--white);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.watchlater_year {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.watchlater_card_title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.watchlater_empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 28px;
+  border: var(--border-width) dashed var(--border-muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.watchlater_empty_badge {
+  padding: 6px 10px;
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.watchlater_empty h2 {
+  font-size: clamp(1.3rem, 4vw, 2rem);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+}
+
+.watchlater_empty p {
+  max-width: 520px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.watchlater_empty_action {
+  padding: 14px 22px;
+  background: var(--accent);
+  color: var(--white);
+  border: var(--border-width) solid var(--white);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: background 0.1s, box-shadow 0.1s;
+}
+
+.watchlater_empty_action:hover {
+  background: var(--accent-hover);
+  box-shadow: 6px 6px 0 var(--white);
+}
+
+@media (max-width: 600px) {
+  .watchlater {
+    padding: 76px 12px 28px;
+  }
+
+  .watchlater_header {
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .watchlater_title {
+    letter-spacing: 2px;
+  }
+
+  .watchlater_grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .watchlater_card_body {
+    padding: 12px;
+  }
+
+  .watchlater_card_title {
+    font-size: 12px;
+  }
+
+  .watchlater_empty {
+    padding: 18px 16px;
+  }
+}
