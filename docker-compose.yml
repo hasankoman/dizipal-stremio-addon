@@ -1,0 +1,21 @@
+services:
+  movie:
+    build: .
+    restart: always
+    # Tum ayarlar .env'den gelir. Ozellikle TMDB_TOKEN sart: IMDB -> icerik
+    # eslemesi ona dayaniyor, yoksa addon hicbir stream dondurmez.
+    env_file:
+      - .env
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.movie.rule=Host(`movie.hasankoman.dev`)
+      - traefik.http.routers.movie.tls=true
+      - traefik.http.routers.movie.entrypoints=web,websecure
+      - traefik.http.routers.movie.tls.certresolver=mytlschallenge
+      - traefik.http.services.movie.loadbalancer.server.port=7000
+    networks:
+      - n8n_default
+
+networks:
+  n8n_default:
+    external: true
