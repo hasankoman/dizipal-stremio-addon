@@ -1,39 +1,25 @@
 require("dotenv").config()
+
+// Torrentio-style stream provider: no catalog of its own, no meta. Stremio shows
+// the content (meta comes from Cinemeta) and this addon only contributes sources,
+// addressed by IMDB id. Subtitles ride along inside each stream object, so the
+// separate `subtitles` resource is not needed.
 const manifest = {
     id: 'org.komanmovie',
-    version: '1.0.2',
+    version: '2.0.0',
     name: 'KomanMovie',
-    description: "Film ve dizileri izleyin.",
+    description: "Türkçe film ve dizi kaynakları.",
     contactEmail: "hasan@hasankoman.dev",
     logo: `${process.env.HOSTING_URL}/images/logo.png`,
     background: `${process.env.HOSTING_URL}/images/background.jpg`,
     behaviorHints: {
         configurable: false,
-        configurationRequired: true,
+        configurationRequired: false,
     },
-    config: [{
-        key: "komanmovie",
-        required: false
-    }],
-    catalogs: [{
-        type: "series",
-        id: "komanmovie",
-        extra: [{
-            name: "search",
-            isRequired: true
-        }]
-    },
-    {
-        type: "movie",
-        id: "komanmovie",
-        extra: [{
-            name: "search",
-            isRequired: true
-        }]
-    }],
-    resources: ['stream', 'meta', 'subtitles'],
-    types: ["movie", 'series'],
-    idPrefixes: ["/"]
+    catalogs: [],
+    resources: ['stream'],
+    types: ["movie", "series"],
+    idPrefixes: ["tt"]
 }
 
 module.exports = manifest;

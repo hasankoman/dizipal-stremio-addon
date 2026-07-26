@@ -20,6 +20,11 @@ const { setupCache } = require("axios-cache-interceptor");
 const instance = Axios.create();
 const axios = setupCache(instance);
 
+// The site keeps hopping to a new numbered domain; resolve it at boot and
+// re-check periodically so PROXY_URL never has to be edited by hand.
+const domainResolver = require("./src/domainResolver");
+domainResolver.startAutoRefresh();
+
 
 
 
@@ -29,6 +34,102 @@ const STALE_REVALIDATE_AGE = 4 * 60 * 60; // 4 hours
 const STALE_ERROR_AGE = 7 * 24 * 60 * 60; // 7 days
 
 const myCache = new NodeCache({ stdTTL: 30*60, checkperiod: 300 });
+
+// --- Stremio addon routes -------------------------------------------------
+// These must come BEFORE express.static: the React build ships its own
+// manifest.json, which would otherwise shadow the addon manifest.
+const imdbMapper = require("./src/imdbMapper");
+
+const STREAM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
+const LANG_MAP = {
+    tr: "tur", tu: "tur", tur: "tur", turkce: "tur", turkish: "tur",
+    en: "eng", eng: "eng", english: "eng", ingilizce: "eng",
+};
+
+// videos.js clips JWPlayer labels to two chars ("Türkçe" -> "tü"), so fold the
+// Turkish letters to ASCII before matching and allow prefix hits.
+function toIso3(label) {
+    var key = String(label || "").trim().toLocaleLowerCase("tr")
+        .replace(/[ıİ]/g, "i").replace(/[şŞ]/g, "s").replace(/[ğĞ]/g, "g")
+        .replace(/[üÜ]/g, "u").replace(/[öÖ]/g, "o").replace(/[çÇ]/g, "c");
+    if (!key) return "tur";
+    if (LANG_MAP[key]) return LANG_MAP[key];
+    for (var k in LANG_MAP) {
+        if (k.indexOf(key) === 0 || key.indexOf(k) === 0) return LANG_MAP[k];
+    }
+    return key.slice(0, 3);
+}
+
+// GetVideos returns subtitles in two shapes depending on which player it hit:
+// JWPlayer tracks give {url,lang,label}, Playerjs gives raw "[Türkçe]https://..." strings.
+function normalizeSubtitles(subs) {
+    if (!Array.isArray(subs)) return [];
+    var out = [];
+    for (var i = 0; i < subs.length; i++) {
+        var s = subs[i];
+        if (typeof s === "string") {
+            var tagged = s.match(/^\s*\[([^\]]+)\]\s*(\S+)/);
+            if (tagged) out.push({ id: "koman-" + i, url: tagged[2], lang: toIso3(tagged[1]) });
+            else if (/^https?:\/\//i.test(s.trim())) out.push({ id: "koman-" + i, url: s.trim(), lang: "tur" });
+        } else if (s && s.url) {
+            out.push({ id: "koman-" + i, url: s.url, lang: toIso3(s.lang || s.label) });
+        }
+    }
+    return out;
+}
+
+function proxify(url, referer) {
+    return process.env.HOSTING_URL + "/proxy/"
+        + Buffer.from(referer).toString("base64url") + "/"
+        + Buffer.from(url).toString("base64url");
+}
+
+async function streamHandler(req, res) {
+    try {
+        var type = req.params.type;
+        var id = String(req.params.id || "").replace(/\.json$/, "");
+        if (type !== "movie" && type !== "series") return respond(res, { streams: [] });
+
+        var target = await imdbMapper.resolveStreamTarget(type, id);
+        if (!target) return respond(res, { streams: [] });
+
+        var video = await listVideo.GetVideos(target.path);
+        if (!video || !video.url) return respond(res, { streams: [] });
+
+        // Everything goes through our own /proxy: the source 403s without a
+        // Referer, and it also mislabels segments as image/jpeg, which players
+        // refuse to decode. proxyHeaders could carry the Referer but cannot fix
+        // the content type, so proxying is the only path that plays.
+        var referer = video.referer || process.env.PROXY_URL + "/";
+        var stream = {
+            name: "KomanMovie",
+            title: target.title || "Türkçe kaynak",
+            url: proxify(video.url, referer),
+        };
+
+        var subtitles = normalizeSubtitles(video.subtitles).map(function (s) {
+            return { id: s.id, lang: s.lang, url: proxify(s.url, referer) };
+        });
+        if (subtitles.length) stream.subtitles = subtitles;
+
+        return respond(res, {
+            streams: [stream],
+            cacheMaxAge: CACHE_MAX_AGE,
+            staleRevalidate: STALE_REVALIDATE_AGE,
+            staleError: STALE_ERROR_AGE,
+        });
+    } catch (error) {
+        console.log("[stream] hata:", error.message);
+        return respond(res, { streams: [] });
+    }
+}
+
+app.get(["/manifest.json", "/addon/manifest.json"], function (req, res) {
+    return respond(res, { ...MANIFEST });
+});
+
+app.get(["/stream/:type/:id", "/addon/stream/:type/:id"], streamHandler);
 
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, "frontend", "netflix-clone", "build"), { index: false }));
@@ -55,22 +156,10 @@ app.get("/:userConf?/configure", function (req, res) {
         }
 });
 
-app.get('/manifest.json', function (req, res) {
-        const newManifest = { ...MANIFEST };
-        // newManifest.behaviorHints.configurationRequired = false;
-        newManifest.behaviorHints.configurationRequired = true;
-        return respond(res, newManifest);
-});
-
+// /manifest.json and /addon/manifest.json are served above, before the static
+// middleware. This one keeps any other install path working.
 app.get('/:userConf/manifest.json', function (req, res) {
-        const newManifest = { ...MANIFEST };
-        if (!((req || {}).params || {}).userConf) {
-            newManifest.behaviorHints.configurationRequired = true;
-           return respond(res, newManifest);
-        } else {
-            newManifest.behaviorHints.configurationRequired = false;
-           return respond(res, newManifest);
-        }
+        return respond(res, { ...MANIFEST });
 });
 
 // API for frontend
@@ -877,29 +966,8 @@ app.get('/addon/meta/:type/:id/', async (req, res, next) => {
 })
 
 
-app.get('/addon/stream/:type/:id/', async (req, res, next) => {
-    try {
-        var { type, id } = req.params;
-        id = String(id).replace(".json", "");
-        if (id) {
-            var video = await listVideo.GetVideos(id);
-            if (video) {
-                // Encode the video URL and referer for proxying
-                var encodedUrl = Buffer.from(video.url).toString('base64url');
-                var encodedReferer = Buffer.from(video.referer || process.env.PROXY_URL + "/").toString('base64url');
-                var proxyUrl = `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encodedUrl}`;
-
-                const stream = { url: proxyUrl };
-                if (video.subtitles) {
-                    myCache.set(id, video.subtitles);
-                }
-                return respond(res, { streams: [stream],cacheMaxAge: CACHE_MAX_AGE, staleRevalidate: STALE_REVALIDATE_AGE, staleError: STALE_ERROR_AGE })
-            }
-        }
-    } catch (error) {
-        console.log(error);
-    }
-})
+// The Stremio stream route now lives above the static middleware (streamHandler),
+// resolving IMDB ids instead of the site's own slugs.
 
 app.get('/addon/subtitles/:type/:id/:query?.json', async (req, res, next) => {
     try {
@@ -1052,8 +1120,20 @@ app.get('/proxy/:referer/:url', async (req, res) => {
             return res.send(text);
         }
 
-        // For .ts segments and other binary data
-        res.setHeader('Content-Type', contentType);
+        // For .ts segments and other binary data.
+        // The CDN mislabels video segments as image/jpeg to dodge filtering, and
+        // players refuse to decode them ("no audio or video data played").
+        // Trust the bytes instead: 0x47 is the MPEG-TS sync byte, "ftyp" marks fMP4.
+        var outType = contentType;
+        var buf = Buffer.from(body);
+        if (buf.length > 8) {
+            if (buf[0] === 0x47) outType = 'video/mp2t';
+            else if (buf.slice(4, 8).toString('ascii') === 'ftyp') outType = 'video/mp4';
+        }
+        if (outType !== contentType) {
+            console.log('[proxy] content-type duzeltildi:', contentType, '->', outType);
+        }
+        res.setHeader('Content-Type', outType);
         res.setHeader('Access-Control-Allow-Origin', '*');
         if (response.headers['content-length']) {
             res.setHeader('Content-Length', response.headers['content-length']);

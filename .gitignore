@@ -1,3 +1,5 @@
 node_modules/
 .env
 static/subs/
+.domain-cache.json
+.imdb-cache.json

@@ -9,8 +9,11 @@ services:
       - key: PORT
         value: 7000
       - key: PROXY_URL
-        value: https://dizipal2043.com
+        value: https://dizipal2089.com
       - key: URLGETSTATUS
         value: false
       - key: HOSTING_URL
+        sync: false
+      # IMDB -> icerik eslemesi bunsuz calismaz; Render panelinden girilmeli.
+      - key: TMDB_TOKEN
         sync: false

@@ -5,6 +5,10 @@ const instance = Axios.create();
 const axios = setupCache(instance);
 
 async function fetchWithCookies(url) {
+  // Without a cookie server configured there is nothing to call; the site's
+  // DDoS-Guard cookies already come back on the page response itself.
+  if (!process.env.COOKIESERVER) return undefined;
+
   var cookieData = {
     url: url,
     token: "free"
@@ -15,7 +19,7 @@ async function fetchWithCookies(url) {
       return response.data;
     }
   } catch (error) {
-    console.error('Error fetching the URL:', error);
+    console.error('Error fetching cookies:', error.message);
   }
 }
 

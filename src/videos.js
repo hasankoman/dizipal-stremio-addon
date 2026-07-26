@@ -5,6 +5,7 @@ const cheerio = require("cheerio");
 const Axios = require('axios')
 const { setupCache } = require("axios-cache-interceptor");
 const CryptoJS = require('crypto-js');
+const domainResolver = require("./domainResolver");
 
 const instance = Axios.create();
 const axios = setupCache(instance);
@@ -52,9 +53,13 @@ function decryptIframeUrl(jsonStr) {
     }
 }
 
-async function GetVideos(id) {
+async function GetVideos(id, isRetry) {
     try {
         var requestedUrl = new URL(id, process.env.PROXY_URL).toString();
+        // The data-cfg token is single-use, but the edge cache keeps replaying the same
+        // page with an already spent token. A unique query param forces a fresh token.
+        // Cache-Control/Pragma headers are ignored by the edge, only this works.
+        requestedUrl += (requestedUrl.indexOf("?") === -1 ? "?" : "&") + "_=" + Date.now();
         var response = await Axios({
             ...sslfix,
             url: requestedUrl,
@@ -63,7 +68,8 @@ async function GetVideos(id) {
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
             method: "GET",
-            maxRedirects: 5,
+            // The site moves domains often, each hop is a 301 to the next number
+            maxRedirects: 30,
         });
 
         if (response && response.status == 200) {
@@ -134,6 +140,13 @@ async function GetVideos(id) {
         }
     } catch (error) {
         console.log(error);
+    }
+
+    // Nothing resolved: the site may have hopped to a new domain, or the single-use
+    // token lost a race. Re-resolve the domain and give it exactly one more try.
+    if (!isRetry) {
+        await domainResolver.resolveDomain({ force: true });
+        return await GetVideos(id, true);
     }
 }
 
