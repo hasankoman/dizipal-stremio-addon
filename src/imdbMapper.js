@@ -11,7 +11,7 @@ const searchVideo = require("./search");
 const CACHE_FILE = path.join(__dirname, "..", ".imdb-cache.json");
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const SEARCH_THROTTLE = 1200;                  // the site answers 429 to bursts
-const MISS_TTL = 24 * 60 * 60 * 1000;          // re-try unmatched ids after a day
+const MISS_TTL = 6 * 60 * 60 * 1000;           // re-try unmatched ids after 6 hours
 const MIN_SCORE = 60;                          // below this a match is a guess, not a match
 
 var cache = null;
@@ -43,15 +43,19 @@ function remember(imdbId, entry) {
 
 // Serialises every site search through one chain so concurrent Stremio requests
 // can never turn into a burst and trip the 429.
+// Returns null on failure — distinct from [] ("searched fine, nothing matched"),
+// so a transient 429 is never cached as "this title does not exist".
 function throttledSearch(query) {
     searchChain = searchChain.then(async function () {
         var wait = SEARCH_THROTTLE - (Date.now() - lastSearchAt);
         if (wait > 0) await new Promise(function (r) { setTimeout(r, wait); });
         lastSearchAt = Date.now();
         try {
-            return await searchVideo.SearchMovieAndSeries(query);
+            var results = await searchVideo.SearchMovieAndSeries(query);
+            return Array.isArray(results) ? results : null;
         } catch (e) {
-            return [];
+            console.log("[imdb] arama hatasi (" + query + "):", e.message);
+            return null;
         }
     });
     return searchChain;
@@ -153,8 +157,10 @@ async function resolveContent(imdbId, type) {
     if (type) info.type = type; // Stremio's own type wins over TMDB's guess
 
     var seen = new Map();
+    var searchFailed = false;
     for (var i = 0; i < info.titles.length; i++) {
         var results = await throttledSearch(info.titles[i]);
+        if (results === null) { searchFailed = true; continue; }
         for (var j = 0; j < results.length; j++) {
             if (!seen.has(results[j].url)) seen.set(results[j].url, results[j]);
         }
@@ -164,7 +170,9 @@ async function resolveContent(imdbId, type) {
 
     var best = pickBest(Array.from(seen.values()), info);
     if (!best || best.score < MIN_SCORE) {
-        remember(imdbId, { url: null, ts: Date.now() });
+        // Only record a miss when the searches actually ran. Caching a miss after
+        // a 429 would hide an existing title for hours.
+        if (!searchFailed) remember(imdbId, { url: null, ts: Date.now() });
         return null;
     }
 
