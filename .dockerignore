@@ -1,0 +1,12 @@
+node_modules
+frontend/netflix-clone/node_modules
+.git
+.env
+
+# Runtime caches must never be baked into the image: a stale negative entry
+# would ship with every build and hide titles that actually exist.
+.imdb-cache.json
+.domain-cache.json
+
+static/subs
+*.log

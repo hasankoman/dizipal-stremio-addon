@@ -49,9 +49,13 @@ async function SearchMovieAndSeries(name) {
             return results;
         }
     } catch (error) {
-        if (error) console.log(error);
+        // Return null, not []. Callers must be able to tell "the search failed"
+        // from "the search ran and found nothing" — imdbMapper caches the latter
+        // as a miss, and swallowing the error here would hide real titles.
+        if (error) console.log("[search] hata:", error.message);
+        return null;
     }
-    return [];
+    return null;
 }
 
 async function SearchMetaMovieAndSeries(id, type) {
