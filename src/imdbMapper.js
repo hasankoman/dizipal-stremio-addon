@@ -103,10 +103,14 @@ function pickBest(candidates, info) {
     return best;
 }
 
+// Three-way result, because the caller must not cache a miss after a failure:
+//   object    -> found
+//   null      -> TMDB answered, this id genuinely has no movie/tv match
+//   undefined -> the lookup itself failed (network, auth, rate limit)
 async function tmdbLookup(imdbId) {
     if (!process.env.TMDB_TOKEN) {
         console.log("[imdb] TMDB_TOKEN tanimli degil");
-        return null;
+        return undefined;
     }
     try {
         var response = await Axios({
@@ -116,7 +120,10 @@ async function tmdbLookup(imdbId) {
             timeout: 20000,
             validateStatus: function () { return true; },
         });
-        if (response.status !== 200 || !response.data) return null;
+        if (response.status !== 200 || !response.data) {
+            console.log("[imdb] TMDB yanit hatasi:", response.status);
+            return undefined;
+        }
 
         var movie = (response.data.movie_results || [])[0];
         var tv = (response.data.tv_results || [])[0];
@@ -135,10 +142,11 @@ async function tmdbLookup(imdbId) {
                 year: Number(String(tv.first_air_date || "").slice(0, 4)) || 0,
             };
         }
+        return null; // answered cleanly, but this id maps to nothing
     } catch (e) {
         console.log("[imdb] TMDB hatasi:", e.message);
+        return undefined;
     }
-    return null;
 }
 
 // IMDB id -> the site's own slug (/dizi/... or /film/...), cached on disk.
@@ -150,6 +158,7 @@ async function resolveContent(imdbId, type) {
     }
 
     var info = await tmdbLookup(imdbId);
+    if (info === undefined) return null; // lookup failed — retry next time, do not cache
     if (!info) {
         remember(imdbId, { url: null, ts: Date.now() });
         return null;
