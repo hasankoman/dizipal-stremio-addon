@@ -79,14 +79,47 @@ function normalizeSubtitles(subs) {
     return out;
 }
 
-function proxify(url, referer) {
-    return process.env.HOSTING_URL + "/proxy/"
+// --- Access keys ----------------------------------------------------------
+// Stremio carries whatever path segment precedes /manifest.json into every
+// later request, so putting a key there gates the whole addon (Torrentio uses
+// the same trick). Leave ADDON_KEYS empty to keep the addon public.
+const ADDON_KEYS = String(process.env.ADDON_KEYS || "")
+    .split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+const KEYS_REQUIRED = ADDON_KEYS.length > 0;
+// Real route prefixes must never be mistaken for a key.
+const RESERVED_SEGMENTS = ["addon", "api", "proxy", "stream", "images", "static", "configure"];
+
+function readKey(req) {
+    var key = (req.params || {}).key;
+    if (!key || RESERVED_SEGMENTS.indexOf(key) !== -1) return null;
+    return key;
+}
+
+function keyAllowed(key) {
+    if (!KEYS_REQUIRED) return true;
+    return !!key && ADDON_KEYS.indexOf(key) !== -1;
+}
+
+function denyKey(res) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return res.status(403).json({ err: "Gecersiz veya eksik erisim anahtari" });
+}
+
+function keyPrefix(key) {
+    return key ? "/" + encodeURIComponent(key) : "";
+}
+
+function proxify(url, referer, key) {
+    return process.env.HOSTING_URL + keyPrefix(key) + "/proxy/"
         + Buffer.from(referer).toString("base64url") + "/"
         + Buffer.from(url).toString("base64url");
 }
 
 async function streamHandler(req, res) {
     try {
+        var key = readKey(req);
+        if (!keyAllowed(key)) return denyKey(res);
+
         var type = req.params.type;
         var id = String(req.params.id || "").replace(/\.json$/, "");
         if (type !== "movie" && type !== "series") return respond(res, { streams: [] });
@@ -105,11 +138,11 @@ async function streamHandler(req, res) {
         var stream = {
             name: "KomanMovie",
             title: target.title || "Türkçe kaynak",
-            url: proxify(video.url, referer),
+            url: proxify(video.url, referer, key),
         };
 
         var subtitles = normalizeSubtitles(video.subtitles).map(function (s) {
-            return { id: s.id, lang: s.lang, url: proxify(s.url, referer) };
+            return { id: s.id, lang: s.lang, url: proxify(s.url, referer, key) };
         });
         if (subtitles.length) stream.subtitles = subtitles;
 
@@ -125,11 +158,17 @@ async function streamHandler(req, res) {
     }
 }
 
-app.get(["/manifest.json", "/addon/manifest.json"], function (req, res) {
+function manifestHandler(req, res) {
+    var key = readKey(req);
+    if (!keyAllowed(key)) return denyKey(res);
     return respond(res, { ...MANIFEST });
-});
+}
+
+app.get(["/manifest.json", "/addon/manifest.json"], manifestHandler);
+app.get("/:key/manifest.json", manifestHandler);
 
 app.get(["/stream/:type/:id", "/addon/stream/:type/:id"], streamHandler);
+app.get("/:key/stream/:type/:id", streamHandler);
 
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, "frontend", "netflix-clone", "build"), { index: false }));
@@ -156,11 +195,9 @@ app.get("/:userConf?/configure", function (req, res) {
         }
 });
 
-// /manifest.json and /addon/manifest.json are served above, before the static
-// middleware. This one keeps any other install path working.
-app.get('/:userConf/manifest.json', function (req, res) {
-        return respond(res, { ...MANIFEST });
-});
+// Manifest routes (with and without an access key) are registered above, before
+// the static middleware. A catch-all variant must NOT live here: it would answer
+// any path segment and hand out the manifest without checking the key.
 
 // API for frontend
 app.get("/api/search", async (req, res) => {
@@ -1057,8 +1094,11 @@ function CheckSubtitleFoldersAndFiles() {
 
 
 // Proxy endpoint for HLS streams
-app.get('/proxy/:referer/:url', async (req, res) => {
+async function proxyHandler(req, res) {
     try {
+        var accessKey = readKey(req);
+        if (!keyAllowed(accessKey)) return denyKey(res);
+
         var targetUrl = Buffer.from(req.params.url, 'base64url').toString();
         var referer = Buffer.from(req.params.referer, 'base64url').toString();
         console.log('[proxy] target:', targetUrl);
@@ -1099,19 +1139,23 @@ app.get('/proxy/:referer/:url', async (req, res) => {
             console.log('[proxy] m3u8 baseUrl:', baseUrl);
             console.log('[proxy] m3u8 content (first 500 chars):', text.substring(0, 500));
 
+            // Keep the access key on every rewritten URL, otherwise the player's
+            // follow-up requests for playlists and segments would be rejected.
+            var proxyBase = process.env.HOSTING_URL + keyPrefix(accessKey) + '/proxy/';
+
             // Rewrite all non-comment lines (segment URLs) to go through proxy
             text = text.replace(/^((?!#)\S+.*)$/gm, (match) => {
                 var line = match.trim();
                 if (!line) return match;
                 var fullUrl = line.startsWith('http') ? line : baseUrl + line;
                 var encoded = Buffer.from(fullUrl).toString('base64url');
-                return `${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encoded}`;
+                return `${proxyBase}${encodedReferer}/${encoded}`;
             });
             // Also handle URI= in EXT-X-I-FRAME-STREAM-INF
             text = text.replace(/URI="([^"]+)"/g, (match, uri) => {
                 var fullUrl = uri.startsWith('http') ? uri : baseUrl + uri;
                 var encoded = Buffer.from(fullUrl).toString('base64url');
-                return `URI="${process.env.HOSTING_URL}/proxy/${encodedReferer}/${encoded}"`;
+                return `URI="${proxyBase}${encodedReferer}/${encoded}"`;
             });
 
             console.log('[proxy] rewritten m3u8 (first 500 chars):', text.substring(0, 500));
@@ -1147,7 +1191,10 @@ app.get('/proxy/:referer/:url', async (req, res) => {
         }
         res.status(500).send('Proxy error');
     }
-});
+}
+
+app.get('/proxy/:referer/:url', proxyHandler);
+app.get('/:key/proxy/:referer/:url', proxyHandler);
 
 // SPA catch-all: serve index.html for all unmatched routes (React Router)
 app.get('*', function (req, res) {
