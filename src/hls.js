@@ -1,10 +1,13 @@
-// Reads a HLS master playlist so each quality (and each dub) can be offered to
-// Stremio as its own stream instead of dumping one master on the player.
+// Reads a HLS master playlist so each quality can be offered to Stremio as its
+// own stream, instead of dumping one master and letting ABR decide.
 //
-// The catch: when the source declares audio as a separate rendition
-// (EXT-X-MEDIA + AUDIO="group"), handing out a variant playlist on its own
-// yields video with no sound. So for every combination we emit a small master
-// of our own that pairs one video variant with one audio rendition.
+// Languages are deliberately NOT split into separate streams: every audio
+// rendition stays inside the emitted playlist, so the player's own audio menu
+// can switch dubs during playback. Splitting them would remove that.
+//
+// The catch that makes a generated playlist necessary at all: when the source
+// declares audio as a separate rendition (EXT-X-MEDIA + AUDIO="group"), a bare
+// variant playlist carries no sound.
 
 function attr(line, name) {
     var quoted = line.match(new RegExp(name + '="([^"]*)"'));
@@ -134,43 +137,41 @@ function humanSize(bandwidth, seconds) {
     return Math.round(bytes / 1e6) + " MB";
 }
 
-// Every playable pairing. When a variant references an audio group, it needs an
-// explicit rendition; otherwise the audio is muxed in and audio stays null.
-function buildCombinations(master) {
-    var combos = [];
-    for (var i = 0; i < master.variants.length; i++) {
-        var v = master.variants[i];
-        var group = v.audioGroup;
-        var matching = group
-            ? master.audios.filter(function (a) { return a.group === group; })
-            : [];
-
-        if (!matching.length) {
-            combos.push({ variant: v, audio: null });
-            continue;
-        }
-        for (var k = 0; k < matching.length; k++) {
-            combos.push({ variant: v, audio: matching[k] });
-        }
-    }
-    return combos;
+// The audio renditions a given variant can use. Empty means the audio is muxed
+// into the video segments, so no separate track is needed.
+function audiosFor(master, variant) {
+    if (!variant.audioGroup) return [];
+    return master.audios.filter(function (a) { return a.group === variant.audioGroup; });
 }
 
-// Minimal master pairing one video variant with (optionally) one audio track.
+// Minimal master carrying one video variant plus ALL of its audio renditions.
+// Keeping every language in a single playlist is what lets the player's own
+// audio menu switch dubs mid-playback — splitting them into separate streams
+// would take that away. Dropping them entirely would play the video silent,
+// since a variant playlist holds no audio when the source declares it apart.
 // `proxify` maps a source URL to the URL the player should actually request.
-function buildMiniMaster(variant, audio, proxify) {
+function buildMiniMaster(variant, audios, proxify) {
+    var tracks = Array.isArray(audios) ? audios : (audios ? [audios] : []);
     var out = ["#EXTM3U", "#EXT-X-VERSION:3"];
     var streamInf = "#EXT-X-STREAM-INF:BANDWIDTH=" + (variant.bandwidth || 1000000);
 
     if (variant.resolution) streamInf += ",RESOLUTION=" + variant.resolution;
     if (variant.codecs) streamInf += ',CODECS="' + variant.codecs + '"';
 
-    if (audio) {
-        out.push(
-            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="' + (audio.name || "Audio") + '"'
-            + (audio.lang ? ',LANGUAGE="' + audio.lang + '"' : "")
-            + ',AUTOSELECT=YES,DEFAULT=YES,URI="' + proxify(audio.url) + '"'
-        );
+    if (tracks.length) {
+        // Prefer Turkish as the default track, else whatever the source marked.
+        var defaultIndex = tracks.findIndex(function (a) { return /^tr/i.test(a.lang || "") || /türk|turkish/i.test(a.name || ""); });
+        if (defaultIndex === -1) defaultIndex = tracks.findIndex(function (a) { return a.isDefault; });
+        if (defaultIndex === -1) defaultIndex = 0;
+
+        tracks.forEach(function (a, i) {
+            out.push(
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="' + (a.name || a.lang || ("Audio " + (i + 1))) + '"'
+                + (a.lang ? ',LANGUAGE="' + a.lang + '"' : "")
+                + ",AUTOSELECT=YES,DEFAULT=" + (i === defaultIndex ? "YES" : "NO")
+                + ',URI="' + proxify(a.url) + '"'
+            );
+        });
         streamInf += ',AUDIO="aud"';
     }
 
@@ -179,4 +180,4 @@ function buildMiniMaster(variant, audio, proxify) {
     return out.join("\n") + "\n";
 }
 
-module.exports = { parseMaster, buildCombinations, buildMiniMaster, qualityLabel, durationOf, humanSize };
+module.exports = { parseMaster, audiosFor, buildMiniMaster, qualityLabel, durationOf, humanSize };

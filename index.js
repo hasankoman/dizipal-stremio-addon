@@ -121,17 +121,18 @@ function proxify(url, referer, key) {
         + Buffer.from(url).toString("base64url");
 }
 
-// Points the player at our own mini master playlist for one quality/dub pairing.
-function hlsUrl(variant, audio, referer, key) {
+// Points the player at our own mini master playlist for one quality tier.
+// `direct` leaves the media URLs pointing at the CDN (client fetches them
+// itself); otherwise they are rewritten through /proxy.
+function hlsUrl(variant, audios, referer, key, direct) {
     var spec = {
         v: variant.url,
-        a: audio ? audio.url : null,
+        a: (audios || []).map(function (x) { return { u: x.url, n: x.name, l: x.lang, d: x.isDefault }; }),
         r: referer,
         b: variant.bandwidth,
         res: variant.resolution,
         c: variant.codecs,
-        an: audio ? audio.name : null,
-        al: audio ? audio.lang : null,
+        d: direct ? 1 : 0,
     };
     return process.env.HOSTING_URL + keyPrefix(key) + "/hls/"
         + Buffer.from(JSON.stringify(spec)).toString("base64url") + ".m3u8";
@@ -160,15 +161,14 @@ async function buildStreams(video, referer, key, contentName) {
         }
 
         var master = hls.parseMaster(response.data, video.url);
-        var combos = hls.buildCombinations(master);
-        if (!combos.length) return fallback; // not a master playlist, serve as-is
+        if (!master.variants.length) return fallback; // not a master playlist, serve as-is
 
         // Runtime is identical across variants, so one variant playlist is enough
         // to turn each variant's bitrate into a size estimate.
         var seconds = 0;
         try {
             var probe = await Axios({
-                url: combos[0].variant.url,
+                url: master.variants[0].url,
                 headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
                 method: "GET", timeout: 15000, validateStatus: function () { return true; },
             });
@@ -185,37 +185,40 @@ async function buildStreams(video, referer, key, contentName) {
         });
 
         var streams = [];
-        combos.forEach(function (c) {
+        master.variants.forEach(function (variant) {
+            // All languages for this tier travel inside one playlist, so the
+            // player's audio menu can switch between them mid-playback.
+            var audios = hls.audiosFor(master, variant);
+
             var details = [];
-            if (c.variant.resolution) details.push("🎬 " + c.variant.resolution);
-            if (c.audio && c.audio.name) details.push("🎧 " + c.audio.name);
-            var size = hls.humanSize(c.variant.bandwidth, seconds);
+            if (variant.resolution) details.push("🎬 " + variant.resolution);
+            if (audios.length) {
+                var names = audios.map(function (a) { return a.name || a.lang; }).filter(Boolean);
+                if (names.length) details.push("🎧 " + names.join(", "));
+            }
+            var size = hls.humanSize(variant.bandwidth, seconds);
             if (size) details.push("💾 " + size);
-            if (c.variant.bandwidth) details.push("📶 " + (c.variant.bandwidth / 1000000).toFixed(1) + " Mbps");
+            if (variant.bandwidth) details.push("📶 " + (variant.bandwidth / 1000000).toFixed(1) + " Mbps");
             if (seconds) details.push("⏱ " + Math.round(seconds / 60) + " dk");
 
-            // The dub belongs in `name` too: with several audio tracks every
-            // entry would otherwise read "KomanMovie 720p" and be indistinguishable
-            // in Stremio's source list.
-            var label = c.variant.quality || "";
-            if (c.audio && c.audio.name) label += (label ? " • " : "") + c.audio.name;
+            var label = variant.quality || "";
             var detailLine = details.length ? "\n" + details.join(" • ") : "";
 
-            // Direct: the player fetches the CDN itself and carries the Referer via
-            // proxyHeaders. Costs us no bandwidth and needs no TR exit, but requires
-            // a client that honours proxyHeaders (mpv-based, e.g. Harbor) and sits
-            // in a region the CDN serves.
+            // Direct: only the small generated playlist comes from us, the media
+            // itself is fetched from the CDN by the player, with the Referer
+            // carried via proxyHeaders. Needs a client that honours proxyHeaders
+            // (mpv-based, e.g. Harbor) and a viewer the CDN serves.
             if (STREAM_MODE !== "proxy") {
                 var direct = {
                     name: "KomanMovie ⚡" + (label ? "\n" + label : ""),
                     title: contentName + detailLine + "\n⚡ Doğrudan bağlantı",
-                    url: c.variant.url,
+                    url: hlsUrl(variant, audios, referer, key, true),
                     behaviorHints: {
                         notWebReady: true,
+                        bingeGroup: "koman-direct-" + (variant.quality || "x"),
                         proxyHeaders: { request: { Referer: referer, "User-Agent": STREAM_UA } },
                     },
                 };
-                if (c.audio) direct.behaviorHints.bingeGroup = "koman-" + (c.audio.lang || c.audio.name);
                 // Subtitles stay proxied even here: proxyHeaders only covers the
                 // video request, and these are a few KB — not worth the risk of a
                 // 403 on a track the player fetches on its own.
@@ -229,7 +232,8 @@ async function buildStreams(video, referer, key, contentName) {
                 var proxied = {
                     name: "KomanMovie 🛡" + (label ? "\n" + label : ""),
                     title: contentName + detailLine + "\n🛡 Sunucu üzerinden",
-                    url: hlsUrl(c.variant, c.audio, referer, key),
+                    url: hlsUrl(variant, audios, referer, key, false),
+                    behaviorHints: { bingeGroup: "koman-proxy-" + (variant.quality || "x") },
                 };
                 if (masterSubs.length) proxied.subtitles = masterSubs;
                 streams.push(proxied);
@@ -250,11 +254,17 @@ function hlsHandler(req, res) {
         var raw = String(req.params.spec || "").replace(/\.m3u8$/, "");
         var spec = JSON.parse(Buffer.from(raw, "base64url").toString());
         var variant = { url: spec.v, bandwidth: spec.b, resolution: spec.res, codecs: spec.c };
-        var audio = spec.a ? { url: spec.a, name: spec.an, lang: spec.al } : null;
-
-        var text = hls.buildMiniMaster(variant, audio, function (u) {
-            return proxify(u, spec.r, key);
+        var audios = (spec.a || []).map(function (x) {
+            return { url: x.u, name: x.n, lang: x.l, isDefault: x.d };
         });
+
+        // In direct mode the media URLs stay on the CDN — only this playlist
+        // comes from us, so we carry no video traffic.
+        var mapUrl = spec.d
+            ? function (u) { return u; }
+            : function (u) { return proxify(u, spec.r, key); };
+
+        var text = hls.buildMiniMaster(variant, audios, mapUrl);
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
         res.setHeader("Access-Control-Allow-Origin", "*");
         return res.send(text);
