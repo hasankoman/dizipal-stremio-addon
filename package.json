@@ -24,6 +24,7 @@
     "express": "^4.19.2",
     "node-cache": "^5.1.2",
     "path": "^0.12.7",
+    "socks-proxy-agent": "^10.1.0",
     "stremio-addon-sdk": "^1.6.10",
     "subtitle-converter": "^3.0.12",
     "tough-cookie": "^6.0.1",
