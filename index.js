@@ -39,6 +39,7 @@ const myCache = new NodeCache({ stdTTL: 30*60, checkperiod: 300 });
 // These must come BEFORE express.static: the React build ships its own
 // manifest.json, which would otherwise shadow the addon manifest.
 const imdbMapper = require("./src/imdbMapper");
+const hls = require("./src/hls");
 
 const STREAM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -87,7 +88,7 @@ const ADDON_KEYS = String(process.env.ADDON_KEYS || "")
     .split(",").map(function (s) { return s.trim(); }).filter(Boolean);
 const KEYS_REQUIRED = ADDON_KEYS.length > 0;
 // Real route prefixes must never be mistaken for a key.
-const RESERVED_SEGMENTS = ["addon", "api", "proxy", "stream", "images", "static", "configure"];
+const RESERVED_SEGMENTS = ["addon", "api", "proxy", "stream", "hls", "images", "static", "configure"];
 
 function readKey(req) {
     var key = (req.params || {}).key;
@@ -115,6 +116,118 @@ function proxify(url, referer, key) {
         + Buffer.from(url).toString("base64url");
 }
 
+// Points the player at our own mini master playlist for one quality/dub pairing.
+function hlsUrl(variant, audio, referer, key) {
+    var spec = {
+        v: variant.url,
+        a: audio ? audio.url : null,
+        r: referer,
+        b: variant.bandwidth,
+        res: variant.resolution,
+        c: variant.codecs,
+        an: audio ? audio.name : null,
+        al: audio ? audio.lang : null,
+    };
+    return process.env.HOSTING_URL + keyPrefix(key) + "/hls/"
+        + Buffer.from(JSON.stringify(spec)).toString("base64url") + ".m3u8";
+}
+
+// One Stremio entry per quality (and per dub). Stremio reads the quality tier
+// from `name`, which is why a bare "KomanMovie" showed up as Unknown.
+async function buildStreams(video, referer, key, contentName) {
+    var fallback = [{
+        name: "KomanMovie",
+        title: contentName,
+        url: proxify(video.url, referer, key),
+    }];
+
+    try {
+        var response = await Axios({
+            url: video.url,
+            headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
+            method: "GET",
+            timeout: 20000,
+            validateStatus: function () { return true; },
+        });
+        if (response.status !== 200) return fallback;
+
+        var master = hls.parseMaster(response.data, video.url);
+        var combos = hls.buildCombinations(master);
+        if (!combos.length) return fallback; // not a master playlist, serve as-is
+
+        // Runtime is identical across variants, so one variant playlist is enough
+        // to turn each variant's bitrate into a size estimate.
+        var seconds = 0;
+        try {
+            var probe = await Axios({
+                url: combos[0].variant.url,
+                headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
+                method: "GET", timeout: 15000, validateStatus: function () { return true; },
+            });
+            if (probe.status === 200) seconds = hls.durationOf(probe.data);
+        } catch (e) { /* size is a nicety, never fail the request over it */ }
+
+        // Subtitle renditions are only visible here, not in GetVideos' output.
+        var masterSubs = master.subtitles.map(function (s, i) {
+            return {
+                id: "hls-" + i,
+                lang: toIso3(s.lang || s.name),
+                url: proxify(s.url, referer, key),
+            };
+        });
+
+        var streams = combos.map(function (c) {
+            var details = [];
+            if (c.variant.resolution) details.push("🎬 " + c.variant.resolution);
+            if (c.audio && c.audio.name) details.push("🎧 " + c.audio.name);
+            var size = hls.humanSize(c.variant.bandwidth, seconds);
+            if (size) details.push("💾 " + size);
+            if (c.variant.bandwidth) details.push("📶 " + (c.variant.bandwidth / 1000000).toFixed(1) + " Mbps");
+            if (seconds) details.push("⏱ " + Math.round(seconds / 60) + " dk");
+
+            // The dub belongs in `name` too: with several audio tracks every
+            // entry would otherwise read "KomanMovie 720p" and be indistinguishable
+            // in Stremio's source list.
+            var label = c.variant.quality || "";
+            if (c.audio && c.audio.name) label += (label ? " • " : "") + c.audio.name;
+
+            var stream = {
+                name: "KomanMovie" + (label ? "\n" + label : ""),
+                title: contentName + (details.length ? "\n" + details.join(" • ") : ""),
+                url: hlsUrl(c.variant, c.audio, referer, key),
+            };
+            if (masterSubs.length) stream.subtitles = masterSubs;
+            return stream;
+        });
+
+        return streams;
+    } catch (e) {
+        console.log("[stream] master playlist okunamadi:", e.message);
+        return fallback;
+    }
+}
+
+function hlsHandler(req, res) {
+    var key = readKey(req);
+    if (!keyAllowed(key)) return denyKey(res);
+    try {
+        var raw = String(req.params.spec || "").replace(/\.m3u8$/, "");
+        var spec = JSON.parse(Buffer.from(raw, "base64url").toString());
+        var variant = { url: spec.v, bandwidth: spec.b, resolution: spec.res, codecs: spec.c };
+        var audio = spec.a ? { url: spec.a, name: spec.an, lang: spec.al } : null;
+
+        var text = hls.buildMiniMaster(variant, audio, function (u) {
+            return proxify(u, spec.r, key);
+        });
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        return res.send(text);
+    } catch (e) {
+        console.log("[hls] hata:", e.message);
+        return res.status(400).send("Gecersiz playlist");
+    }
+}
+
 async function streamHandler(req, res) {
     try {
         var key = readKey(req);
@@ -135,19 +248,23 @@ async function streamHandler(req, res) {
         // refuse to decode. proxyHeaders could carry the Referer but cannot fix
         // the content type, so proxying is the only path that plays.
         var referer = video.referer || process.env.PROXY_URL + "/";
-        var stream = {
-            name: "KomanMovie",
-            title: target.title || "Türkçe kaynak",
-            url: proxify(video.url, referer, key),
-        };
+        var contentName = target.title || "Türkçe kaynak";
 
         var subtitles = normalizeSubtitles(video.subtitles).map(function (s) {
             return { id: s.id, lang: s.lang, url: proxify(s.url, referer, key) };
         });
-        if (subtitles.length) stream.subtitles = subtitles;
+
+        var streams = await buildStreams(video, referer, key, contentName);
+        if (subtitles.length) {
+            // Merge, do not replace: buildStreams may already have attached the
+            // subtitle renditions found in the master playlist.
+            streams.forEach(function (s) {
+                s.subtitles = (s.subtitles || []).concat(subtitles);
+            });
+        }
 
         return respond(res, {
-            streams: [stream],
+            streams: streams,
             cacheMaxAge: CACHE_MAX_AGE,
             staleRevalidate: STALE_REVALIDATE_AGE,
             staleError: STALE_ERROR_AGE,
@@ -169,6 +286,9 @@ app.get("/:key/manifest.json", manifestHandler);
 
 app.get(["/stream/:type/:id", "/addon/stream/:type/:id"], streamHandler);
 app.get("/:key/stream/:type/:id", streamHandler);
+
+app.get("/hls/:spec", hlsHandler);
+app.get("/:key/hls/:spec", hlsHandler);
 
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, "frontend", "netflix-clone", "build"), { index: false }));
@@ -1173,6 +1293,9 @@ async function proxyHandler(req, res) {
         if (buf.length > 8) {
             if (buf[0] === 0x47) outType = 'video/mp2t';
             else if (buf.slice(4, 8).toString('ascii') === 'ftyp') outType = 'video/mp4';
+            // Subtitle renditions are served as application/octet-stream; players
+            // need a real WebVTT type to render them.
+            else if (buf.slice(0, 6).toString('utf8').replace(/^﻿/, '').indexOf('WEBVTT') === 0) outType = 'text/vtt';
         }
         if (outType !== contentType) {
             console.log('[proxy] content-type duzeltildi:', contentType, '->', outType);
