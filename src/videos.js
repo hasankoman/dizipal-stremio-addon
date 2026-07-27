@@ -6,7 +6,6 @@ const Axios = require('axios')
 const { setupCache } = require("axios-cache-interceptor");
 const CryptoJS = require('crypto-js');
 const domainResolver = require("./domainResolver");
-const sourceProxy = require("./sourceProxy");
 
 const instance = Axios.create();
 const axios = setupCache(instance);
@@ -169,17 +168,17 @@ async function ScrapeVideoUrl(scrapeUrl, customReferer) {
             "sec-fetch-mode": "navigate",
             "sec-fetch-site": "cross-site",
         };
-        // The embed host rejects this server's IP too, and a 403 here yields a
-        // stub page with no player config — so the whole chain silently fails.
-        var response = await sourceProxy.withFallback(scrapeUrl, function (extra) {
-            return Axios({
-                url: scrapeUrl,
-                headers: scrapeHeader,
-                method: "GET",
-                validateStatus: function () { return true; },
-                ...extra,
-            });
+        // A 403 here (some hosts reject datacentre IPs) returns a stub page with
+        // no player config, so log it rather than letting it look like an empty page.
+        var response = await Axios({
+            url: scrapeUrl,
+            headers: scrapeHeader,
+            method: "GET",
+            validateStatus: function () { return true; },
         });
+        if (response && response.status !== 200) {
+            console.log("[scrape] " + response.status + " -> " + scrapeUrl.slice(0, 70));
+        }
         if (response && response.status == 200) {
             var html = response.data;
 

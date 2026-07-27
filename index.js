@@ -40,7 +40,6 @@ const myCache = new NodeCache({ stdTTL: 30*60, checkperiod: 300 });
 // manifest.json, which would otherwise shadow the addon manifest.
 const imdbMapper = require("./src/imdbMapper");
 const hls = require("./src/hls");
-const sourceProxy = require("./src/sourceProxy");
 
 const STREAM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -148,17 +147,17 @@ async function buildStreams(video, referer, key, contentName) {
     }];
 
     try {
-        var response = await sourceProxy.withFallback(video.url, function (extra) {
-            return Axios({
-                url: video.url,
-                headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
-                method: "GET",
-                timeout: 20000,
-                validateStatus: function () { return true; },
-                ...extra,
-            });
+        var response = await Axios({
+            url: video.url,
+            headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
+            method: "GET",
+            timeout: 20000,
+            validateStatus: function () { return true; },
         });
-        if (response.status !== 200) return fallback;
+        if (response.status !== 200) {
+            console.log("[stream] master playlist alinamadi:", response.status);
+            return fallback;
+        }
 
         var master = hls.parseMaster(response.data, video.url);
         var combos = hls.buildCombinations(master);
@@ -168,13 +167,10 @@ async function buildStreams(video, referer, key, contentName) {
         // to turn each variant's bitrate into a size estimate.
         var seconds = 0;
         try {
-            var probe = await sourceProxy.withFallback(combos[0].variant.url, function (extra) {
-                return Axios({
-                    url: combos[0].variant.url,
-                    headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
-                    method: "GET", timeout: 15000, validateStatus: function () { return true; },
-                    ...extra,
-                });
+            var probe = await Axios({
+                url: combos[0].variant.url,
+                headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
+                method: "GET", timeout: 15000, validateStatus: function () { return true; },
             });
             if (probe.status === 200) seconds = hls.durationOf(probe.data);
         } catch (e) { /* size is a nicety, never fail the request over it */ }
@@ -1264,28 +1260,23 @@ async function proxyHandler(req, res) {
         console.log('[proxy] target:', targetUrl);
         console.log('[proxy] referer:', referer);
 
-        // Some CDNs reject this server's IP outright; withFallback retries such
-        // hosts through the configured TR exit and remembers them.
-        var response = await sourceProxy.withFallback(targetUrl, function (extra) {
-            return Axios({
-                url: targetUrl,
-                method: "GET",
-                headers: {
-                    "Referer": referer,
-                    "Origin": referer.replace(/\/$/, ''),
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-                    "Accept": "*/*",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Sec-Fetch-Dest": "empty",
-                    "Sec-Fetch-Mode": "cors",
-                    "Sec-Fetch-Site": "cross-site",
-                },
-                responseType: 'arraybuffer',
-                timeout: 30000,
-                maxRedirects: 5,
-                validateStatus: function () { return true; },
-                ...extra,
-            });
+        var response = await Axios({
+            url: targetUrl,
+            method: "GET",
+            headers: {
+                "Referer": referer,
+                "Origin": referer.replace(/\/$/, ''),
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                "Accept": "*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "cross-site",
+            },
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            maxRedirects: 5,
+            validateStatus: function () { return true; },
         });
 
         if (response.status >= 400) {
