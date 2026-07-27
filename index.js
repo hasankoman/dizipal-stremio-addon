@@ -1390,6 +1390,12 @@ app.get('/:key/proxy/:referer/:url', proxyHandler);
 
 // SPA catch-all: serve index.html for all unmatched routes (React Router)
 app.get('*', function (req, res) {
+    // Asset-looking paths must 404 instead of falling through to the SPA shell.
+    // A missing /images/logo.png was answering 200 with HTML, so Stremio drew a
+    // broken image where the addon logo belongs.
+    if (/\.(png|jpe?g|gif|svg|webp|ico|css|js|map|m3u8|ts|vtt|woff2?)$/i.test(req.path)) {
+        return res.status(404).send('Not found');
+    }
     res.sendFile(path.join(__dirname, "frontend", "netflix-clone", "build", "index.html"));
 });
 
