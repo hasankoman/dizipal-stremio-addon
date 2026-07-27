@@ -141,6 +141,22 @@ function hlsUrl(variant, audios, referer, key, direct) {
 // One Stremio entry per quality (and per dub). Stremio reads the quality tier
 // from `name`, which is why a bare "KomanMovie" showed up as Unknown.
 async function buildStreams(video, referer, key, contentName) {
+    // videos.js sets embedUrl when it could not extract a media URL from the embed
+    // page — typically because that host refuses this server's IP. Hand the page
+    // itself to the client: a viewer in the CDN's region can resolve it locally.
+    if (video.embedUrl) {
+        console.log("[stream] embed cozulemedi, istemciye birakiliyor:", String(video.url).slice(0, 70));
+        return [{
+            name: "KomanMovie 🔗\nKaynak sayfası",
+            title: contentName + "\n🔗 Bağlantı cihazda çözülecek",
+            url: video.url,
+            behaviorHints: {
+                notWebReady: true,
+                proxyHeaders: { request: { Referer: referer, "User-Agent": STREAM_UA } },
+            },
+        }];
+    }
+
     var fallback = [{
         name: "KomanMovie",
         title: contentName,
