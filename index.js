@@ -44,6 +44,11 @@ const sourceProxy = require("./src/sourceProxy");
 
 const STREAM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
+// direct = client fetches the CDN itself (mpv-based players, viewer in-region)
+// proxy  = everything flows through us (works anywhere, costs bandwidth)
+// both   = offer each variant twice, direct first
+const STREAM_MODE = (process.env.STREAM_MODE || "both").toLowerCase();
+
 const LANG_MAP = {
     tr: "tur", tu: "tur", tur: "tur", turkce: "tur", turkish: "tur",
     en: "eng", eng: "eng", english: "eng", ingilizce: "eng",
@@ -183,7 +188,8 @@ async function buildStreams(video, referer, key, contentName) {
             };
         });
 
-        var streams = combos.map(function (c) {
+        var streams = [];
+        combos.forEach(function (c) {
             var details = [];
             if (c.variant.resolution) details.push("🎬 " + c.variant.resolution);
             if (c.audio && c.audio.name) details.push("🎧 " + c.audio.name);
@@ -197,14 +203,41 @@ async function buildStreams(video, referer, key, contentName) {
             // in Stremio's source list.
             var label = c.variant.quality || "";
             if (c.audio && c.audio.name) label += (label ? " • " : "") + c.audio.name;
+            var detailLine = details.length ? "\n" + details.join(" • ") : "";
 
-            var stream = {
-                name: "KomanMovie" + (label ? "\n" + label : ""),
-                title: contentName + (details.length ? "\n" + details.join(" • ") : ""),
-                url: hlsUrl(c.variant, c.audio, referer, key),
-            };
-            if (masterSubs.length) stream.subtitles = masterSubs;
-            return stream;
+            // Direct: the player fetches the CDN itself and carries the Referer via
+            // proxyHeaders. Costs us no bandwidth and needs no TR exit, but requires
+            // a client that honours proxyHeaders (mpv-based, e.g. Harbor) and sits
+            // in a region the CDN serves.
+            if (STREAM_MODE !== "proxy") {
+                var direct = {
+                    name: "KomanMovie ⚡" + (label ? "\n" + label : ""),
+                    title: contentName + detailLine + "\n⚡ Doğrudan bağlantı",
+                    url: c.variant.url,
+                    behaviorHints: {
+                        notWebReady: true,
+                        proxyHeaders: { request: { Referer: referer, "User-Agent": STREAM_UA } },
+                    },
+                };
+                if (c.audio) direct.behaviorHints.bingeGroup = "koman-" + (c.audio.lang || c.audio.name);
+                // Subtitles stay proxied even here: proxyHeaders only covers the
+                // video request, and these are a few KB — not worth the risk of a
+                // 403 on a track the player fetches on its own.
+                if (masterSubs.length) direct.subtitles = masterSubs;
+                streams.push(direct);
+            }
+
+            // Proxied: works everywhere (fixes the mislabelled content type and
+            // carries the Referer server-side), at the cost of our bandwidth.
+            if (STREAM_MODE !== "direct") {
+                var proxied = {
+                    name: "KomanMovie 🛡" + (label ? "\n" + label : ""),
+                    title: contentName + detailLine + "\n🛡 Sunucu üzerinden",
+                    url: hlsUrl(c.variant, c.audio, referer, key),
+                };
+                if (masterSubs.length) proxied.subtitles = masterSubs;
+                streams.push(proxied);
+            }
         });
 
         return streams;
