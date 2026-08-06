@@ -12,6 +12,9 @@ services:
     # konteyner disinda tutuluyor.
     environment:
       - DUBSYNC_STORE=/data/dubsync-store.json
+      # Hazirlanan sesler de konteyner disinda kalmali: aksi halde her yeniden
+      # derleme onlari siliyor ve kullanici ilk acilisi yeniden bekliyor.
+      - DUB_CACHE_DIR=/data/dub-cache
     volumes:
       - ./data:/data
     labels:

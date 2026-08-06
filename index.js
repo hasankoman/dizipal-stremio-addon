@@ -305,6 +305,10 @@ async function streamHandler(req, res) {
         var target = await imdbMapper.resolveStreamTarget(type, id);
         if (!target) return respond(res, { streams: [] });
 
+        // Istemci kaynak listesini alirken dublaj hazirligini baslat; oynatma
+        // basladiginda ses cogunlukla hazir olur.
+        prewarmDub(target.path);
+
         var video = await listVideo.GetVideos(target.path);
         if (!video || !video.url) return respond(res, { streams: [] });
 
@@ -387,6 +391,26 @@ const DUB_CACHE_TTL_MS = Number(process.env.DUB_CACHE_TTL_HOURS || 168) * 60 * 6
     sweep();
     setInterval(sweep, 6 * 60 * 60 * 1000).unref();
 })();
+
+// Olculmus bir plani olan bolumun sesini, istemci daha istemeden hazirlamaya
+// baslar. Ilk acilista beklenen sure indirme + yeniden kodlamadan geliyor;
+// kullanici kaynak secerken bunu arka planda ilerletmek beklemeyi kisaltiyor.
+// Yalnizca plani olan bolumler icin calisir, yani gozat trafigi is uretmez.
+function prewarmDub(contentPath) {
+    var plan = dubstore.get(contentPath);
+    if (!plan || !plan.atempo) return;
+    (async function () {
+        try {
+            var source = await dubsync.resolveTrAudioSource(contentPath);
+            await dubsync.prepareCorrectedAudio(source, contentPath, plan.atempo, {
+                cacheDir: DUB_CACHE_DIR,
+                segments: (plan.segments && plan.segments.length > 1) ? plan.segments : null,
+            });
+        } catch (e) {
+            console.log("[dub] onhazirlik atlandi:", e.message);
+        }
+    })();
+}
 
 // Kaynak fps'i bir segment indirmeyi gerektiriyor; icerik basina onbellege alinir.
 async function sourceFpsOf(source, contentPath) {
