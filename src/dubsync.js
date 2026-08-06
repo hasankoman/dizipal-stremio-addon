@@ -40,14 +40,33 @@ function run(cmd, args, opts) {
     });
 }
 
+// -extension_picky ffmpeg 7.1 ile geldi; daha eski surumler (ör. Ubuntu'nun
+// 6.1'i) bunu taniyip hata veriyor ve komut hic calismiyor. Bir kez sorup
+// sonucu sakliyoruz — surum farki dagitim ortamlari arasinda gercek bir fark.
+var extensionPickySupport = null;
+function supportsExtensionPicky() {
+    if (extensionPickySupport !== null) return extensionPickySupport;
+    try {
+        var out = require("child_process").execFileSync(
+            "ffmpeg", ["-hide_banner", "-h", "demuxer=hls"],
+            { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }
+        );
+        extensionPickySupport = out.indexOf("extension_picky") !== -1;
+    } catch (e) {
+        extensionPickySupport = false;
+    }
+    return extensionPickySupport;
+}
+
 function httpHeaderArgs(source) {
     if (!source || !source.referer) return [];
     var lines = ["Referer: " + source.referer, "User-Agent: " + UA];
     if (source.cookies) lines.push("Cookie: " + source.cookies);
     // CDN, HLS segmentlerini .jpg gibi sahte uzantilarla servis ediyor;
     // ffmpeg'in hls demuxer'i bunlari varsayilan olarak reddeder.
-    return ["-allowed_extensions", "ALL", "-extension_picky", "0",
-        "-headers", lines.join("\r\n") + "\r\n"];
+    var args = ["-allowed_extensions", "ALL"];
+    if (supportsExtensionPicky()) args.push("-extension_picky", "0");
+    return args.concat(["-headers", lines.join("\r\n") + "\r\n"]);
 }
 
 // Herhangi bir girdiyi (yerel dosya ya da URL) mono 8 kHz PCM'e cozer.
@@ -443,6 +462,30 @@ async function prepareCorrectedAudio(source, contentPath, atempo, opts) {
     return { status: "preparing", file: outFile, job: job };
 }
 
+// Hazirlanan sesler bolum basina ~60 MB tutuyor ve bir daha istenmeyebilir;
+// budanmazsa disk sessizce dolar. Son erisimi eskiyenler siliniyor — dosya
+// yeniden istenirse zaten yeniden uretiliyor.
+function pruneCache(dir, maxAgeMs) {
+    var cacheDir = dir || path.join(os.tmpdir(), "komanmovie-dub");
+    var cutoff = Date.now() - (maxAgeMs || 7 * 24 * 60 * 60 * 1000);
+    var removed = 0;
+    try {
+        fs.readdirSync(cacheDir).forEach(function (name) {
+            var file = path.join(cacheDir, name);
+            try {
+                var stat = fs.statSync(file);
+                if (!stat.isFile()) return;
+                // Hazirlanmakta olan bir dosyayi silmemek icin .part atlanir;
+                // yarim kalmis olanlar da yaslaninca zaten temizlenir.
+                if (/\.part$/.test(name) && Date.now() - stat.mtimeMs < 60 * 60 * 1000) return;
+                var last = Math.max(stat.atimeMs || 0, stat.mtimeMs || 0);
+                if (last < cutoff) { fs.unlinkSync(file); removed++; }
+            } catch (e) { /* yarista silinmis olabilir */ }
+        });
+    } catch (e) { /* dizin henuz yok */ }
+    return removed;
+}
+
 // ------------------------------------------------------------- mux ----
 
 // Referans videonun tum izlerini koruyup senkronlanmis TR sesini ekler.
@@ -471,5 +514,5 @@ async function muxDub(refFile, dubAudioFile, outFile, sync, opts) {
 
 module.exports = {
     resolveTrAudioSource, downloadAudio, decodePcm, probeDuration, measureSync, muxDub,
-    probeSourceFps, snapFps, prepareCorrectedAudio, SR,
+    probeSourceFps, snapFps, prepareCorrectedAudio, pruneCache, SR,
 };

@@ -376,6 +376,17 @@ const dubstore = require("./src/dubstore");
 
 const dubFpsCache = new NodeCache({ stdTTL: 24 * 60 * 60 });
 const DUB_CACHE_DIR = process.env.DUB_CACHE_DIR || Path.join(os.tmpdir(), "komanmovie-dub");
+const DUB_CACHE_TTL_MS = Number(process.env.DUB_CACHE_TTL_HOURS || 168) * 60 * 60 * 1000;
+
+// Hazirlanan sesler bolum basina ~60 MB; budanmazsa disk sessizce dolar.
+(function scheduleDubPrune() {
+    function sweep() {
+        var n = dubsync.pruneCache(DUB_CACHE_DIR, DUB_CACHE_TTL_MS);
+        if (n) console.log("[dub] onbellekten " + n + " dosya silindi");
+    }
+    sweep();
+    setInterval(sweep, 6 * 60 * 60 * 1000).unref();
+})();
 
 // Kaynak fps'i bir segment indirmeyi gerektiriyor; icerik basina onbellege alinir.
 async function sourceFpsOf(source, contentPath) {
