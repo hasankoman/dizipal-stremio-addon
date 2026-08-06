@@ -164,9 +164,11 @@ async function buildStreams(video, referer, key, contentName) {
     }];
 
     try {
+        var srcHeaders = { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" };
+        if (video.cookies) srcHeaders.Cookie = video.cookies;
         var response = await Axios({
             url: video.url,
-            headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
+            headers: srcHeaders,
             method: "GET",
             timeout: 20000,
             validateStatus: function () { return true; },
@@ -185,7 +187,7 @@ async function buildStreams(video, referer, key, contentName) {
         try {
             var probe = await Axios({
                 url: master.variants[0].url,
-                headers: { Referer: referer, "User-Agent": STREAM_UA, Accept: "*/*" },
+                headers: srcHeaders,
                 method: "GET", timeout: 15000, validateStatus: function () { return true; },
             });
             if (probe.status === 200) seconds = hls.durationOf(probe.data);
@@ -343,14 +345,24 @@ function manifestHandler(req, res) {
     return respond(res, { ...MANIFEST });
 }
 
+// /:key/... rotalari /api/... gibi gercek yollari da yakalar (ör. /api/stream/...
+// istegi key="api" olarak buraya duser ve key hatasi doner). Rezerve segmentlerde
+// next() ile asagida tanimli gercek rotaya birakiyoruz.
+function keyedRoute(handler) {
+    return function (req, res, next) {
+        if (RESERVED_SEGMENTS.indexOf(req.params.key) !== -1) return next();
+        return handler(req, res, next);
+    };
+}
+
 app.get(["/manifest.json", "/addon/manifest.json"], manifestHandler);
-app.get("/:key/manifest.json", manifestHandler);
+app.get("/:key/manifest.json", keyedRoute(manifestHandler));
 
 app.get(["/stream/:type/:id", "/addon/stream/:type/:id"], streamHandler);
-app.get("/:key/stream/:type/:id", streamHandler);
+app.get("/:key/stream/:type/:id", keyedRoute(streamHandler));
 
 app.get("/hls/:spec", hlsHandler);
-app.get("/:key/hls/:spec", hlsHandler);
+app.get("/:key/hls/:spec", keyedRoute(hlsHandler));
 
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, "frontend", "netflix-clone", "build"), { index: false }));
@@ -822,7 +834,9 @@ app.get("/api/download-progress/:path(*)", async (req, res) => {
 
         activeDownloads.set(contentPath, { tmpFile, filename, status: "downloading" });
 
-        var ytdlp = spawn("yt-dlp", [
+        // Bazi kaynaklar (FirePlayer/imagestoo) securedLink'i sadece embed
+        // oturum cerezi ile verir; cerez olmadan CDN 403 doner.
+        var ytdlpArgs = [
             "--referer", referer,
             "--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "-o", tmpFile,
@@ -830,8 +844,10 @@ app.get("/api/download-progress/:path(*)", async (req, res) => {
             "--newline",
             "--concurrent-fragments", "16",
             "--progress-template", "%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s",
-            video.url
-        ]);
+        ];
+        if (video.cookies) ytdlpArgs.push("--add-headers", "Cookie: " + video.cookies);
+        ytdlpArgs.push(video.url);
+        var ytdlp = spawn("yt-dlp", ytdlpArgs);
 
         var aborted = false;
         var maxProgress = 0;
@@ -960,15 +976,17 @@ app.get("/api/download/:path(*)", async (req, res) => {
         res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
         res.setHeader("Content-Type", "video/mp4");
 
-        var ytdlp = spawn("yt-dlp", [
+        var ytdlpArgs = [
             "--referer", referer,
             "--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "-o", tmpFile,
             "--no-part",
             "--quiet",
             "--concurrent-fragments", "16",
-            video.url
-        ]);
+        ];
+        if (video.cookies) ytdlpArgs.push("--add-headers", "Cookie: " + video.cookies);
+        ytdlpArgs.push(video.url);
+        var ytdlp = spawn("yt-dlp", ytdlpArgs);
 
         var aborted = false;
 
@@ -1386,7 +1404,7 @@ async function proxyHandler(req, res) {
 }
 
 app.get('/proxy/:referer/:url', proxyHandler);
-app.get('/:key/proxy/:referer/:url', proxyHandler);
+app.get('/:key/proxy/:referer/:url', keyedRoute(proxyHandler));
 
 // SPA catch-all: serve index.html for all unmatched routes (React Router)
 app.get('*', function (req, res) {

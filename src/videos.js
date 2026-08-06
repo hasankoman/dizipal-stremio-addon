@@ -151,6 +151,14 @@ async function GetVideos(id, isRetry) {
 }
 
 
+// Embed sunucularının (ör. imagestoo/FirePlayer) verdiği securedLink, yalnızca
+// Referer ile 403 döner; embed sayfasının set ettiği oturum çerezi
+// (fireplayer_player) de zorunlu. Bu yüzden çerezler sonuçla birlikte döner.
+function cookieHeaderOf(response) {
+    var setCookies = (response && response.headers && response.headers["set-cookie"]) || [];
+    return setCookies.map(function (c) { return c.split(";")[0]; }).join("; ");
+}
+
 async function ScrapeVideoUrl(scrapeUrl, customReferer) {
     try {
         var embedOrigin = scrapeUrl;
@@ -181,6 +189,7 @@ async function ScrapeVideoUrl(scrapeUrl, customReferer) {
         }
         if (response && response.status == 200) {
             var html = response.data;
+            var embedCookies = cookieHeaderOf(response);
 
             // Method 1: FirePlayer API (imagestoo.com style)
             // The FirePlayer call is inside packed JS, so we need to unpack first
@@ -222,10 +231,12 @@ async function ScrapeVideoUrl(scrapeUrl, customReferer) {
                         }
                     );
                     if (apiRes.data && apiRes.data.videoSource) {
+                        var apiCookies = cookieHeaderOf(apiRes);
                         return {
                             url: apiRes.data.securedLink || apiRes.data.videoSource,
                             subtitles: null,
                             referer: embedOrigin + "/",
+                            cookies: [embedCookies, apiCookies].filter(Boolean).join("; ") || undefined,
                         };
                     }
                 } catch(e) {
@@ -292,6 +303,7 @@ async function ScrapeVideoUrl(scrapeUrl, customReferer) {
                     url: playerFileLink,
                     subtitles: subtitles,
                     referer: embedOrigin + "/",
+                    cookies: embedCookies || undefined,
                 };
             }
         }
