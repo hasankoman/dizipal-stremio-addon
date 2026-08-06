@@ -49,10 +49,44 @@ function get(contentPath) {
 
 // Istemcinin oynattigi dosya, olcumun yapildigi dosyayla ayni surum mu?
 // refDuration yoksa dogrulanamaz; bu durumda kayit "dogrulanmamis" sayilir.
+// /bolum/lioness-2-sezon-1-bolum -> "lioness"
+function seriesSlug(contentPath) {
+    var m = /^\/bolum\/(.+?)-\d+-sezon-\d+-bolum/.exec(String(contentPath || ""));
+    return m ? m[1] : null;
+}
+
+// Bastaki kirpma bolumun degil, kaynagin ozelligi: ayni dizinin olculen
+// bolumleri ayni degeri veriyorsa (Lioness S02'de uc bolum de 3079.5 ms),
+// olculmemis bolume de ayni deger uygulanabilir. Boylece her bolum icin
+// onceden olcum yapma zorunlulugu kalkiyor.
+//
+// Bolumler arasinda anlamli fark varsa tahmin URETILMEZ: yanlis bir sabit
+// uygulamak, hic uygulamamaktan daha kotu bir sonuc verebilir.
+function seriesEstimate(contentPath) {
+    var slug = seriesSlug(contentPath);
+    if (!slug) return null;
+    var all = readAll();
+    var values = [];
+    Object.keys(all).forEach(function (key) {
+        if (key === contentPath || seriesSlug(key) !== slug) return;
+        var v = all[key] && all[key].delayMs;
+        if (typeof v === "number") values.push(v);
+    });
+    if (values.length < 2) return null;
+    values.sort(function (a, b) { return a - b; });
+    var spread = values[values.length - 1] - values[0];
+    if (spread > 250) return null;
+    return {
+        delayMs: values[(values.length - 1) >> 1],
+        samples: values.length,
+        spreadMs: spread,
+    };
+}
+
 function matches(entry, targetDuration) {
     if (!entry || entry.delayMs == null) return false;
     if (!targetDuration || !entry.refDuration) return false;
     return Math.abs(targetDuration - entry.refDuration) <= DURATION_TOLERANCE;
 }
 
-module.exports = { get, put, matches, STORE_FILE, DURATION_TOLERANCE };
+module.exports = { get, put, matches, seriesEstimate, seriesSlug, STORE_FILE, DURATION_TOLERANCE };

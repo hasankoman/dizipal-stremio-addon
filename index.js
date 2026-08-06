@@ -422,6 +422,10 @@ async function dubInfoHandler(req, res) {
 
         var measured = dubstore.get(target.path);
         var trusted = dubstore.matches(measured, targetDuration);
+        // Bu bolum hic olculmediyse ayni dizinin olculen bolumlerinden turet.
+        // Kayit VAR ama surum tutmuyorsa tahmin uretilmez: tahmin de ayni
+        // surumlerden geliyor, dolayisiyla o da yanlis olurdu.
+        var estimate = measured ? null : dubstore.seriesEstimate(target.path);
 
         var url = process.env.HOSTING_URL + keyPrefix(key) + "/dub/" + type + "/"
             + encodeURIComponent(id) + ".m4a?fps=" + (targetFps || "");
@@ -437,11 +441,13 @@ async function dubInfoHandler(req, res) {
             targetFps: targetFps || null,
             speed: speed,
             atempo: atempo,
-            delayMs: trusted ? measured.delayMs : null,
+            delayMs: trusted ? measured.delayMs : (estimate ? estimate.delayMs : null),
             delaySource: trusted ? "measured"
+                : estimate ? "series-estimate"     // ayni dizinin olculen bolumlerinden
                 : !measured ? "unknown"
                 : !targetDuration ? "unverified"   // sure bildirilmedi, dogrulanamadi
                 : "release-mismatch",              // baska bir surum oynatiliyor
+            delaySamples: estimate ? estimate.samples : undefined,
             muxed: source.kind === "muxed-variant",
         };
         if (!corrected) return respond(res, payload);
