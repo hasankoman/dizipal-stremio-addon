@@ -21,6 +21,7 @@ const hlsParser = require("./hls");
 const Axios = require("axios");
 
 const SR = 8000; // analiz ornekleme hizi; 1 ornek = 0.125 ms cozunurluk
+const ENV_HZ = 50; // zarf ornekleme hizi (20 ms adim)
 // Ayni kurgudaki kayitlarda artik ~0.04 ms cikiyor; 100 ms ustu, modelin
 // tutmadigi (kurgu farki) anlamina geliyor.
 const MAX_RESIDUAL_MS = 50;
@@ -183,7 +184,7 @@ function highpass(x, fc) {
 
 // 50 Hz log-RMS zarfi (kaba arama icin kucuk ve gurbuz temsil).
 function envelope(x) {
-    var hop = SR / 50;
+    var hop = SR / ENV_HZ;
     var n = Math.floor(x.length / hop);
     var e = new Float64Array(n);
     var mean = 0;
@@ -312,6 +313,108 @@ function measureSync(refPcm, dubPcm, log) {
     };
 }
 
+// --------------------------------------------- parcali hizalama ----
+
+// Sifir ortalamali, birim normlu benzerlik (-1..1). Iki kaynak da DUBLAJ
+// oldugunda (ör. Fransizca surum + Turkce dublaj) ham ornek korelasyonu
+// tutmuyor — mikslar farkli — ama zarf benzerligi tutuyor.
+function ncc(a, ao, b, bo, len) {
+    var ma = 0, mb = 0;
+    for (var i = 0; i < len; i++) { ma += a[ao + i]; mb += b[bo + i]; }
+    ma /= len; mb /= len;
+    var num = 0, da = 0, db = 0;
+    for (var j = 0; j < len; j++) {
+        var x = a[ao + j] - ma, y = b[bo + j] - mb;
+        num += x * y; da += x * x; db += y * y;
+    }
+    return num / (Math.sqrt(da * db) + 1e-12);
+}
+
+function bestOffsetNcc(er, ed, d0, win, center, search) {
+    var best = -2, bl = center;
+    for (var lag = center - search; lag <= center + search; lag++) {
+        if (lag < 0 || lag + win > er.length) continue;
+        var s = ncc(er, lag, ed, d0, win);
+        if (s > best) { best = s; bl = lag; }
+    }
+    return { off: (bl - d0) / ENV_HZ, score: best };
+}
+
+// Iki surumun kurgusu ayni degilse (araya giren parcalar kesilmisse) offset
+// sabit kalmaz, her kesikte bir kademe artar — tek bir gecikme bolumun
+// tamamini hizalayamaz. Bu fonksiyon o kademeleri cikarir.
+//
+// dubPcm, hiz duzeltmesi UYGULANMIS olmali: donen zamanlar duzeltilmis sesin
+// kendi zaman ekseninde, boylece uretim tarafi dogrudan kullanabiliyor.
+//
+// Yontem: uzun pencerelerle guvenilir offset platolari bulunur, sonra iki plato
+// arasindaki gecis "hangi hizalama daha iyi acikliyor" sorusunun cevabinin
+// degistigi an aranarak keskinlestirilir.
+function measureSegments(refPcm, dubPcm, log) {
+    log = log || function () {};
+    var er = envelope(highpass(refPcm, 60));
+    var ed = envelope(highpass(dubPcm, 60));
+
+    var WIN = Math.round(30 * ENV_HZ);
+    var STEP = Math.round(10 * ENV_HZ);
+    var SEARCH = Math.round(20 * ENV_HZ);
+    var MIN_SCORE = 0.45;
+
+    var pts = [];
+    for (var d0 = Math.round(10 * ENV_HZ); d0 + WIN < ed.length - 10 * ENV_HZ; d0 += STEP) {
+        var r = bestOffsetNcc(er, ed, d0, WIN, d0 + Math.round(5 * ENV_HZ), SEARCH);
+        if (r.score > MIN_SCORE) pts.push({ t: d0 / ENV_HZ, off: r.off, score: r.score });
+    }
+    if (pts.length < 4) return { segments: [], reliable: false, reason: "yeterli kilit yok" };
+
+    // Ardisik ve ayni (±0.1 sn) olcumler bir plato; tek pencerelik sicramalar
+    // gurultudur, en az uc pencere istiyoruz.
+    var plateaus = [];
+    pts.forEach(function (p) {
+        var last = plateaus[plateaus.length - 1];
+        if (last && Math.abs(p.off - last.off) <= 0.1) {
+            last.n++;
+            last.end = p.t;
+            last.off = (last.off * (last.n - 1) + p.off) / last.n;
+        } else {
+            plateaus.push({ off: p.off, start: p.t, end: p.t, n: 1 });
+        }
+    });
+    var solid = plateaus.filter(function (p) { return p.n >= 3; });
+    if (!solid.length) return { segments: [], reliable: false, reason: "kararli plato yok" };
+
+    // Ilk segment bolumun basindan baslar.
+    var segments = [{ start: 0, offset: solid[0].off }];
+    var PROBE = Math.round(3 * ENV_HZ);
+    for (var i = 1; i < solid.length; i++) {
+        var A = segments[segments.length - 1].offset;
+        var B = solid[i].off;
+        if (Math.abs(B - A) < 0.2) continue;          // olcum gurultusu, kesik degil
+        var lo = solid[i - 1].end, hi = solid[i].start;
+
+        var cut = null, prev = null;
+        for (var t = lo; t <= hi; t += 0.5) {
+            var di = Math.round(t * ENV_HZ);
+            var ai = Math.round((t + A) * ENV_HZ), bi = Math.round((t + B) * ENV_HZ);
+            if (di + PROBE > ed.length || ai + PROBE > er.length || bi + PROBE > er.length) break;
+            var diff = ncc(er, bi, ed, di, PROBE) - ncc(er, ai, ed, di, PROBE);
+            if (prev !== null && prev < 0 && diff >= 0) { cut = t; break; }
+            prev = diff;
+        }
+        if (cut === null) cut = (lo + hi) / 2;
+        segments.push({ start: cut, offset: B });
+    }
+
+    var spread = segments[segments.length - 1].offset - segments[0].offset;
+    log("parcali hizalama: " + segments.length + " segment, toplam kayma "
+        + spread.toFixed(2) + " sn");
+    return {
+        segments: segments,
+        totalShiftSec: spread,
+        reliable: segments.length > 0,
+    };
+}
+
 // ------------------------------------------------- kaynak cozumleme ----
 
 // Dizipal icerik yolundan Turkce ses kaynagini cozer.
@@ -410,9 +513,53 @@ async function downloadAudio(source, outFile) {
 // sanilmasin diye once .part'a yazilip bitince yeniden adlandiriliyor.
 const jobs = new Map();
 
-function correctedName(contentPath, atempo, pitch) {
+function planTag(segments) {
+    if (!segments || segments.length < 1) return "";
+    // Plan degisirse dosya adi da degissin; aksi halde eski ses yeniden servis
+    // edilir. Kisa ve deterministik bir ozet yeterli.
+    var s = segments.map(function (x) {
+        return x.start.toFixed(2) + ":" + x.offset.toFixed(3);
+    }).join(",");
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return "__p" + segments.length + (h >>> 0).toString(36);
+}
+
+function correctedName(contentPath, atempo, pitch, segments) {
     var slug = String(contentPath).replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "");
-    return slug + "__" + (pitch === "keep" ? "t" : "r") + atempo.toFixed(6).replace(".", "") + ".m4a";
+    return slug + "__" + (pitch === "keep" ? "t" : "r") + atempo.toFixed(6).replace(".", "")
+        + planTag(segments) + ".m4a";
+}
+
+// Kesiklerde eksilen kadar sessizlik ekleyip parcalari hedefin zaman cizgisine
+// oturtan filtre grafigi. Segmentler hiz duzeltmesi SONRASI zaman ekseninde.
+//
+// Cikti = sessizlik(offset0) + parca0 + sessizlik(offset1-offset0) + parca1 + ...
+// Kesilen icerik geri gelmiyor; yalnizca kalan kisim dogru yere hizalaniyor.
+function segmentFilter(segments, preFilters) {
+    var parts = [];
+    var pre = preFilters.length ? preFilters.join(",") + "," : "";
+    parts.push("[0:a]" + pre + "asplit=" + segments.length
+        + " " + segments.map(function (_, i) { return "[p" + i + "]"; }).join(""));
+
+    var labels = [];
+    segments.forEach(function (seg, i) {
+        var next = segments[i + 1];
+        var trim = "atrim=start=" + seg.start.toFixed(4)
+            + (next ? ":end=" + next.start.toFixed(4) : "");
+        parts.push("[p" + i + "]" + trim + ",asetpts=PTS-STARTPTS[s" + i + "]");
+
+        var gap = i === 0 ? seg.offset : seg.offset - segments[i - 1].offset;
+        if (gap > 0.0005) {
+            parts.push("anullsrc=channel_layout=stereo:sample_rate=48000,"
+                + "atrim=duration=" + gap.toFixed(4) + ",asetpts=PTS-STARTPTS[g" + i + "]");
+            labels.push("[g" + i + "]");
+        }
+        labels.push("[s" + i + "]");
+    });
+
+    parts.push(labels.join("") + "concat=n=" + labels.length + ":v=0:a=1[out]");
+    return parts.join(";");
 }
 
 // asetrate icin ara ornekleme hizi. asetrate tamsayi bir hiz ister; yuksek bir
@@ -432,7 +579,10 @@ async function prepareCorrectedAudio(source, contentPath, atempo, opts) {
     opts = opts || {};
     var dir = opts.cacheDir || path.join(os.tmpdir(), "komanmovie-dub");
     fs.mkdirSync(dir, { recursive: true });
-    var outFile = path.join(dir, correctedName(contentPath, atempo, opts.pitch));
+    // Birden fazla segment varsa hizalama sesin icine isleniyor; tek segmentte
+    // sabit gecikme istemcide uygulandigi icin dosya surumler arasi paylasilir.
+    var segments = (opts.segments && opts.segments.length > 1) ? opts.segments : null;
+    var outFile = path.join(dir, correctedName(contentPath, atempo, opts.pitch, segments));
 
     if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
         return { status: "ready", file: outFile };
@@ -454,9 +604,10 @@ async function prepareCorrectedAudio(source, contentPath, atempo, opts) {
         .concat(httpHeaderArgs(source))
         .concat(["-i", source.url]);
     if (source.kind === "muxed-variant") args = args.concat(["-vn"]);
+    args = segments
+        ? args.concat(["-filter_complex", segmentFilter(segments, filters), "-map", "[out]"])
+        : args.concat(["-map", "0:a:0", "-af", filters.join(",")]);
     args = args.concat([
-        "-map", "0:a:0",
-        "-af", filters.join(","),
         "-c:a", "aac", "-b:a", opts.bitrate || "192k",
         "-movflags", "+faststart",
         "-metadata:s:a:0", "language=tur",
@@ -533,5 +684,5 @@ async function muxDub(refFile, dubAudioFile, outFile, sync, opts) {
 
 module.exports = {
     resolveTrAudioSource, downloadAudio, decodePcm, probeDuration, measureSync, muxDub,
-    probeSourceFps, snapFps, prepareCorrectedAudio, pruneCache, SR,
+    probeSourceFps, snapFps, prepareCorrectedAudio, pruneCache, measureSegments, timeStretch, SR,
 };

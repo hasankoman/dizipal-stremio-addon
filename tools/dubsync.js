@@ -78,6 +78,11 @@ async function episodeMap(seriesPath) {
 
 function fmtMs(x) { return (x >= 0 ? "+" : "") + x.toFixed(1) + " ms"; }
 
+function fmtClock(sec) {
+    var m = Math.floor(sec / 60), r = sec - m * 60;
+    return String(m).padStart(2, "0") + ":" + r.toFixed(1).padStart(4, "0");
+}
+
 async function processOne(file, contentPath, opts) {
     var tag = path.basename(file).replace(/\.[^.]+$/, "");
     console.log("\n=== " + tag);
@@ -100,32 +105,67 @@ async function processOne(file, contentPath, opts) {
     var sync = dubsync.measureSync(refPcm, dubPcm, function (m) { console.log("  " + m); });
     console.log("  olcum " + ((Date.now() - t0) / 1000).toFixed(0) + " sn surdu");
 
-    // Olculen gecikme, /dub ucunun istemciye verecegi tek olculemez parca.
-    // Referans sure de yazilir: istemci baska bir surum oynatiyorsa (farkli
-    // kirpma) sunucu bu degeri uygulamaz.
-    if (opts.save && !sync.reliable && !opts.force) {
-        console.log("  KAYDEDILMEDI: olcum guvenilmez (artik " + sync.residualMs.toFixed(1)
-            + " ms). Iki surumun kurgusu ayni degilse tek bir gecikme zaten yetmez;"
-            + " yine de kaydetmek icin --force.");
-    } else if (opts.save) {
-        var refDuration = await dubsync.probeDuration(file);
-        dubstore.put(contentPath, {
-            delayMs: sync.delayMs,
-            speed: sync.speed,
-            atempo: sync.atempo,
-            refDuration: refDuration,
-            refFile: path.basename(file),
-            residualMs: sync.residualMs,
-            measuredAt: new Date().toISOString(),
-        });
-        console.log("  kaydedildi -> " + dubstore.STORE_FILE);
-    }
-
     console.log("  hiz orani : " + sync.speed.toFixed(7) + (Math.abs(sync.speed - 25 / 23.976) < 0.0005 ? "  (PAL 25/23.976)" : ""));
     console.log("  atempo    : " + sync.atempo.toFixed(7));
     console.log("  delay     : " + fmtMs(sync.delayMs) + " (atempo sonrasi)");
     console.log("  guven     : " + sync.windowsUsed + "/" + sync.windowsTotal + " pencere, artik " + sync.residualMs.toFixed(2) + " ms");
-    if (sync.residualMs > 50) console.log("  UYARI: artik yuksek — sonucu kontrol edin (farkli kurgu olabilir)");
+
+    // Tek gecikme yetmiyorsa (artik yuksek) kurgu farki vardir: offset bolum
+    // boyunca basamak basamak artar. O basamaklari cikarip parcali plan
+    // uretiyoruz — sabit bir sayi bu durumu hicbir degerle temsil edemez.
+    var segments = null;
+    var segPlan = null;
+    if (!sync.reliable) {
+        console.log("  tek gecikme yetmiyor, parcali hizalama araniyor...");
+
+        // Hiz orani BURADA fit'ten alinamaz: fit zaten tutmuyor ve merdiveni
+        // "hiz farki" diye yorumluyor. Kare hizi orani ise olcumden bagimsiz
+        // ve kesin — sunucu da ayni sekilde hesapliyor.
+        var targetFps = dubsync.snapFps(await dubsync.probeSourceFps(file));
+        var src = await dubsync.resolveTrAudioSource(contentPath);
+        var sourceFps = dubsync.snapFps(await dubsync.probeSourceFps(src.videoVariant || src.url, src));
+        var trueSpeed = sourceFps / targetFps;
+        segPlan = { speed: trueSpeed, sourceFps: sourceFps, targetFps: targetFps };
+        console.log("  kare hizi: kaynak " + sourceFps + " / hedef " + targetFps
+            + " -> hiz " + trueSpeed.toFixed(7));
+
+        // Segment zamanlari hiz duzeltmesi SONRASI eksende olmali: uretim
+        // tarafi sesi once ayni oranla yavaslatiyor.
+        var warped = dubPcm;
+        if (Math.abs(trueSpeed - 1) > 0.0005) {
+            warped = dubsync.timeStretch(dubPcm, trueSpeed);
+        }
+        var seg = dubsync.measureSegments(refPcm, warped, function (m) { console.log("  " + m); });
+        if (seg.reliable && seg.segments.length > 1) {
+            segments = seg.segments;
+            console.log("  KESIKLER:");
+            segments.forEach(function (s, i) {
+                if (i === 0) return;
+                var len = s.offset - segments[i - 1].offset;
+                console.log("    " + fmtClock(s.start) + " -> " + len.toFixed(2) + " sn eksik");
+            });
+        } else {
+            console.log("  parcali hizalama da cikarilamadi (" + (seg.reason || "yetersiz") + ")");
+        }
+    }
+
+    if (opts.save && !sync.reliable && !segments && !opts.force) {
+        console.log("  KAYDEDILMEDI: olcum guvenilmez (artik " + sync.residualMs.toFixed(1)
+            + " ms) ve parcali plan cikarilamadi; yine de kaydetmek icin --force.");
+    } else if (opts.save) {
+        var refDuration = await dubsync.probeDuration(file);
+        dubstore.put(contentPath, {
+            delayMs: segments ? 0 : sync.delayMs,   // parcali planda hizalama sesin icinde
+            segments: segments || undefined,
+            speed: segments ? segPlan.speed : sync.speed,
+            atempo: segments ? 1 / segPlan.speed : sync.atempo,
+            refDuration: refDuration,
+            refFile: path.basename(file),
+            residualMs: segments ? 0 : sync.residualMs,
+            measuredAt: new Date().toISOString(),
+        });
+        console.log("  kaydedildi -> " + dubstore.STORE_FILE + (segments ? " (parcali plan)" : ""));
+    }
 
     if (opts.mux) {
         var outDir = opts.outdir || path.dirname(file);

@@ -418,7 +418,6 @@ async function dubInfoHandler(req, res) {
         // kayan bir iz vermekten iyidir — istemci uyariyi gosterebilir.
         var speed = targetFps ? sourceFps / dubsync.snapFps(targetFps) : 1;
         var atempo = 1 / speed;
-        var corrected = Math.abs(atempo - 1) > 0.0005;
 
         var measured = dubstore.get(target.path);
         var trusted = dubstore.matches(measured, targetDuration);
@@ -427,8 +426,18 @@ async function dubInfoHandler(req, res) {
         // surumlerden geliyor, dolayisiyla o da yanlis olurdu.
         var estimate = measured ? null : dubstore.seriesEstimate(target.path);
 
+        // Iki surumun kurgusu ayni degilse offset sabit kalmaz; boyle bir plan
+        // varsa hizalama sesin icine isleniyor (istemcinin uygulayabilecegi tek
+        // bir gecikme bu durumu temsil edemez).
+        var segments = (trusted && measured.segments && measured.segments.length > 1)
+            ? measured.segments : null;
+        var corrected = Math.abs(atempo - 1) > 0.0005 || !!segments;
+
+        // duration da tasinmali: ses ucu ayni plani secebilmek icin hangi surumun
+        // oynatildigini bilmek zorunda.
         var url = process.env.HOSTING_URL + keyPrefix(key) + "/dub/" + type + "/"
-            + encodeURIComponent(id) + ".m4a?fps=" + (targetFps || "");
+            + encodeURIComponent(id) + ".m4a?fps=" + (targetFps || "")
+            + "&duration=" + (targetDuration || "");
 
         var payload = {
             ok: true,
@@ -441,19 +450,27 @@ async function dubInfoHandler(req, res) {
             targetFps: targetFps || null,
             speed: speed,
             atempo: atempo,
-            delayMs: trusted ? measured.delayMs : (estimate ? estimate.delayMs : null),
-            delaySource: trusted ? "measured"
+            // Parcali planda gecikme sesin icinde: istemci ayrica kaydirmamali.
+            delayMs: segments ? 0
+                : trusted ? measured.delayMs
+                : (estimate ? estimate.delayMs : null),
+            delaySource: segments ? "baked-segments"
+                : trusted ? "measured"
                 : estimate ? "series-estimate"     // ayni dizinin olculen bolumlerinden
                 : !measured ? "unknown"
                 : !targetDuration ? "unverified"   // sure bildirilmedi, dogrulanamadi
                 : "release-mismatch",              // baska bir surum oynatiliyor
             delaySamples: estimate ? estimate.samples : undefined,
+            cuts: segments ? segments.length - 1 : undefined,
             muxed: source.kind === "muxed-variant",
         };
         if (!corrected) return respond(res, payload);
 
         // Hazirlik uzun surebilir; istemci hazir olana kadar tekrar sorabilsin.
-        var job = await dubsync.prepareCorrectedAudio(source, target.path, atempo, { cacheDir: DUB_CACHE_DIR });
+        var job = await dubsync.prepareCorrectedAudio(source, target.path, atempo, {
+            cacheDir: DUB_CACHE_DIR,
+            segments: segments,
+        });
         payload.status = job.status;
         return respond(res, payload);
     } catch (error) {
@@ -472,6 +489,7 @@ async function dubAudioHandler(req, res) {
         var type = req.params.type;
         var id = String(req.params.id || "").replace(/\.m4a$/, "");
         var targetFps = Number(req.query.fps) || 0;
+        var targetDuration = Number(req.query.duration) || 0;
 
         var target = await imdbMapper.resolveStreamTarget(type, id);
         if (!target) return res.status(404).json({ err: "icerik bulunamadi" });
@@ -480,7 +498,16 @@ async function dubAudioHandler(req, res) {
         var sourceFps = await sourceFpsOf(source, target.path);
         var atempo = targetFps ? dubsync.snapFps(targetFps) / sourceFps : 1;
 
-        var job = await dubsync.prepareCorrectedAudio(source, target.path, atempo, { cacheDir: DUB_CACHE_DIR });
+        // Bilgi ucuyla ayni plani secmek zorunda: aksi halde farkli bir dosya
+        // uretilir ve istemci yanlis sesi alir.
+        var measured = dubstore.get(target.path);
+        var segments = (dubstore.matches(measured, targetDuration)
+            && measured.segments && measured.segments.length > 1) ? measured.segments : null;
+
+        var job = await dubsync.prepareCorrectedAudio(source, target.path, atempo, {
+            cacheDir: DUB_CACHE_DIR,
+            segments: segments,
+        });
         if (job.status !== "ready") {
             if (!job.job) return res.status(503).json({ err: "hazirlaniyor" });
             await job.job; // ayni dosya icin ikinci istek de ayni isi bekler
