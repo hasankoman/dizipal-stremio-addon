@@ -21,6 +21,9 @@ const hlsParser = require("./hls");
 const Axios = require("axios");
 
 const SR = 8000; // analiz ornekleme hizi; 1 ornek = 0.125 ms cozunurluk
+// Ayni kurgudaki kayitlarda artik ~0.04 ms cikiyor; 100 ms ustu, modelin
+// tutmadigi (kurgu farki) anlamina geliyor.
+const MAX_RESIDUAL_MS = 50;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
 // ---------------------------------------------------------------- ffmpeg ----
@@ -290,12 +293,18 @@ function measureSync(refPcm, dubPcm, log) {
     var residualMs = Math.sqrt(resFin.reduce(function (s2, r) { return s2 + r * r; }, 0) / m.length) * 1000;
 
     var speed = r0 * rw;             // t_ref = offset + speed * t_dub(ham)
+    // Model "sabit gecikme + sabit hiz". Iki surum ayni kurguya sahip degilse
+    // (aradan parcalar kesilmisse) offset merdiven gibi siçrar ve bu modelle
+    // temsil edilemez; artik buyudugunde sonuc guvenilmez sayilir. Olculebilir
+    // esik: ayni kurgudaki kayitlarda artik ~0.04 ms, farkli kurguda 100 ms+.
+    var reliable = residualMs <= MAX_RESIDUAL_MS && m.length >= 6;
     return {
         speed: speed,
         offsetSec: a,
         atempo: 1 / speed,           // dublaji referansa oturtmak icin yavaslatma
         delayMs: a * 1000,           // atempo SONRASI uygulanacak gecikme
         residualMs: residualMs,
+        reliable: reliable,
         windowsUsed: m.length,
         windowsTotal: meas.length,
         coarseQuality: best.quality,
@@ -373,13 +382,23 @@ function snapFps(fps) {
 }
 
 // TR sesi kayipsiz kopyayla yerel dosyaya indirir (mux'ta yeniden kullanilir).
+// Once .part'a yazilip bitince yeniden adlandiriliyor: yarida kesilen bir
+// indirme aksi halde "onbellekte var" sanilip bozuk dosyayla devam ediliyor.
 async function downloadAudio(source, outFile) {
+    var partFile = outFile + ".part";
     var args = ["-v", "error", "-y"]
         .concat(httpHeaderArgs(source))
         .concat(["-i", source.url]);
     if (source.kind === "muxed-variant") args = args.concat(["-vn"]);
-    args = args.concat(["-map", "0:a:0", "-c", "copy", outFile]);
-    await run("ffmpeg", args);
+    // Uzanti .part oldugu icin konteyner ad'dan secilemiyor.
+    args = args.concat(["-map", "0:a:0", "-c", "copy", "-f", "mp4", partFile]);
+    try {
+        await run("ffmpeg", args);
+    } catch (e) {
+        try { fs.unlinkSync(partFile); } catch (e2) {}
+        throw e;
+    }
+    fs.renameSync(partFile, outFile);
     return outFile;
 }
 

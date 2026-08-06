@@ -103,7 +103,11 @@ async function processOne(file, contentPath, opts) {
     // Olculen gecikme, /dub ucunun istemciye verecegi tek olculemez parca.
     // Referans sure de yazilir: istemci baska bir surum oynatiyorsa (farkli
     // kirpma) sunucu bu degeri uygulamaz.
-    if (opts.save) {
+    if (opts.save && !sync.reliable && !opts.force) {
+        console.log("  KAYDEDILMEDI: olcum guvenilmez (artik " + sync.residualMs.toFixed(1)
+            + " ms). Iki surumun kurgusu ayni degilse tek bir gecikme zaten yetmez;"
+            + " yine de kaydetmek icin --force.");
+    } else if (opts.save) {
         var refDuration = await dubsync.probeDuration(file);
         dubstore.put(contentPath, {
             delayMs: sync.delayMs,
@@ -171,6 +175,7 @@ async function processOne(file, contentPath, opts) {
             results.push(await processOne(jobs[i].file, jobs[i].contentPath, {
                 mux: !!args.mux,
                 save: !!args.save,
+                force: !!args.force,
                 outdir: args.outdir && String(args.outdir),
                 audioDir: args["audio-dir"] && String(args["audio-dir"]),
             }));

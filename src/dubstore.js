@@ -18,6 +18,14 @@ const path = require("path");
 // tasinabilmeli. DUBSYNC_STORE verilmezse repo koku kullanilir (yerel calisma).
 const STORE_FILE = process.env.DUBSYNC_STORE || path.join(__dirname, "..", ".dubsync-store.json");
 const DURATION_TOLERANCE = 2.0; // saniye
+// Modelin tutmadigi olcumler (kurgusu farkli surumler) depoya girmemeli; eski
+// kayitlara karsi burada da eleniyor, tek bir kotu deger tum diziyi bozmasin.
+const MAX_RESIDUAL_MS = 50;
+
+function usable(entry) {
+    if (!entry || typeof entry.delayMs !== "number") return false;
+    return !(typeof entry.residualMs === "number" && entry.residualMs > MAX_RESIDUAL_MS);
+}
 
 function readAll() {
     try {
@@ -44,7 +52,8 @@ function put(contentPath, entry) {
 }
 
 function get(contentPath) {
-    return readAll()[contentPath] || null;
+    var entry = readAll()[contentPath];
+    return usable(entry) ? entry : null;
 }
 
 // Istemcinin oynattigi dosya, olcumun yapildigi dosyayla ayni surum mu?
@@ -69,8 +78,7 @@ function seriesEstimate(contentPath) {
     var values = [];
     Object.keys(all).forEach(function (key) {
         if (key === contentPath || seriesSlug(key) !== slug) return;
-        var v = all[key] && all[key].delayMs;
-        if (typeof v === "number") values.push(v);
+        if (usable(all[key])) values.push(all[key].delayMs);
     });
     if (values.length < 2) return null;
     values.sort(function (a, b) { return a - b; });
