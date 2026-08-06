@@ -13,7 +13,10 @@
 const fs = require("fs");
 const path = require("path");
 
-const STORE_FILE = path.join(__dirname, "..", ".dubsync-store.json");
+// Konteynerde uygulama dizini her yeniden derlemede sifirlanir; olculen
+// gecikmeler tek yeniden uretilemeyen veri oldugu icin kalici bir birime
+// tasinabilmeli. DUBSYNC_STORE verilmezse repo koku kullanilir (yerel calisma).
+const STORE_FILE = process.env.DUBSYNC_STORE || path.join(__dirname, "..", ".dubsync-store.json");
 const DURATION_TOLERANCE = 2.0; // saniye
 
 function readAll() {

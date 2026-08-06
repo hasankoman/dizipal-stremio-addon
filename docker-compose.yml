@@ -6,6 +6,14 @@ services:
     # eslemesi ona dayaniyor, yoksa addon hicbir stream dondurmez.
     env_file:
       - .env
+    # Olculen dublaj gecikmeleri yeniden uretilemeyen tek veri: hiz orani
+    # kaynagin fps'inden hesaplanabiliyor ama bastaki kirpma yalnizca
+    # olculebiliyor. Uygulama dizini her derlemede sifirlandigi icin depo
+    # konteyner disinda tutuluyor.
+    environment:
+      - DUBSYNC_STORE=/data/dubsync-store.json
+    volumes:
+      - ./data:/data
     labels:
       - traefik.enable=true
       - traefik.http.routers.movie.rule=Host(`movie.hasankoman.dev`)
