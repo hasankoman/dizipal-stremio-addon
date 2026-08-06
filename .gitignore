@@ -4,3 +4,4 @@ static/subs/
 .domain-cache.json
 .imdb-cache.json
 .dubsync-store.json
+.DS_Store
