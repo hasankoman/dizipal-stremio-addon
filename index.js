@@ -3,6 +3,7 @@ const MANIFEST = require('./manifest');
 const landing = require("./src/landingTemplate");
 const header = require('./header');
 const fs = require('fs')
+const os = require('os');
 const Path = require("path");
 const express = require("express");
 const app = express();
@@ -93,7 +94,7 @@ const ADDON_KEYS = String(process.env.ADDON_KEYS || "")
     .split(",").map(function (s) { return s.trim(); }).filter(Boolean);
 const KEYS_REQUIRED = ADDON_KEYS.length > 0;
 // Real route prefixes must never be mistaken for a key.
-const RESERVED_SEGMENTS = ["addon", "api", "proxy", "stream", "hls", "images", "static", "configure"];
+const RESERVED_SEGMENTS = ["addon", "api", "proxy", "stream", "hls", "images", "static", "configure", "dub"];
 
 function readKey(req) {
     var key = (req.params || {}).key;
@@ -363,6 +364,146 @@ app.get("/:key/stream/:type/:id", keyedRoute(streamHandler));
 
 app.get("/hls/:spec", hlsHandler);
 app.get("/:key/hls/:spec", keyedRoute(hlsHandler));
+
+// --- Dublaj senkron ucu ---------------------------------------------------
+// Kaynak (dizipal) 25 fps PAL hizlandirmali, hedef (REMUX/WEB-DL) genelde
+// 23.976 fps. Bu ses baska bir videonun uzerine eklenince fark SABIT DEGILDIR:
+// saniyede ~43 ms kayar. Oynaticinin "audio delay" ayari sabit kaydirma
+// oldugundan bunu duzeltemez — dogru yer kaynagin kendisidir, bu yuzden ses
+// burada hedefin kare hizina gore yeniden zamanlanip servis edilir.
+const dubsync = require("./src/dubsync");
+const dubstore = require("./src/dubstore");
+
+const dubFpsCache = new NodeCache({ stdTTL: 24 * 60 * 60 });
+const DUB_CACHE_DIR = process.env.DUB_CACHE_DIR || Path.join(os.tmpdir(), "komanmovie-dub");
+
+// Kaynak fps'i bir segment indirmeyi gerektiriyor; icerik basina onbellege alinir.
+async function sourceFpsOf(source, contentPath) {
+    var hit = dubFpsCache.get(contentPath);
+    if (hit) return hit;
+    var fps = dubsync.snapFps(await dubsync.probeSourceFps(source.videoVariant || source.url, source));
+    dubFpsCache.set(contentPath, fps);
+    return fps;
+}
+
+// GET /dub/:type/:id.json?fps=23.976&duration=2635.049
+// Istemci, oynattigi videonun kare hizini ve suresini bildirir; cevap, o hedefe
+// uyarlanmis ses izinin adresini ve (olculmusse) uygulanacak gecikmeyi tasir.
+async function dubInfoHandler(req, res) {
+    var key = readKey(req);
+    if (!keyAllowed(key)) return denyKey(res);
+    try {
+        var type = req.params.type;
+        var id = String(req.params.id || "").replace(/\.json$/, "");
+        var targetFps = Number(req.query.fps) || 0;
+        var targetDuration = Number(req.query.duration) || 0;
+
+        var target = await imdbMapper.resolveStreamTarget(type, id);
+        if (!target) return respond(res, { ok: false, err: "icerik bulunamadi" });
+
+        var source = await dubsync.resolveTrAudioSource(target.path);
+        var sourceFps = await sourceFpsOf(source, target.path);
+        // fps bilinmiyorsa hiz duzeltmesi yapilamaz; ham izi vermek, sessizce
+        // kayan bir iz vermekten iyidir — istemci uyariyi gosterebilir.
+        var speed = targetFps ? sourceFps / dubsync.snapFps(targetFps) : 1;
+        var atempo = 1 / speed;
+        var corrected = Math.abs(atempo - 1) > 0.0005;
+
+        var measured = dubstore.get(target.path);
+        var trusted = dubstore.matches(measured, targetDuration);
+
+        var url = process.env.HOSTING_URL + keyPrefix(key) + "/dub/" + type + "/"
+            + encodeURIComponent(id) + ".m4a?fps=" + (targetFps || "");
+
+        var payload = {
+            ok: true,
+            name: "Türkçe (KomanMovie)",
+            lang: "tur",
+            url: corrected ? url : source.url,
+            direct: !corrected,          // hiz farki yoksa kaynak dogrudan verilir
+            referer: corrected ? null : source.referer,
+            sourceFps: sourceFps,
+            targetFps: targetFps || null,
+            speed: speed,
+            atempo: atempo,
+            delayMs: trusted ? measured.delayMs : null,
+            delaySource: trusted ? "measured"
+                : !measured ? "unknown"
+                : !targetDuration ? "unverified"   // sure bildirilmedi, dogrulanamadi
+                : "release-mismatch",              // baska bir surum oynatiliyor
+            muxed: source.kind === "muxed-variant",
+        };
+        if (!corrected) return respond(res, payload);
+
+        // Hazirlik uzun surebilir; istemci hazir olana kadar tekrar sorabilsin.
+        var job = await dubsync.prepareCorrectedAudio(source, target.path, atempo, { cacheDir: DUB_CACHE_DIR });
+        payload.status = job.status;
+        return respond(res, payload);
+    } catch (error) {
+        console.log("[dub] info hatasi:", error.message);
+        return respond(res, { ok: false, err: error.message });
+    }
+}
+
+// GET /dub/:type/:id.m4a?fps=23.976
+// Hiz duzeltilmis ses dosyasi. mpv harici izde arama yapabilmeli, bu yuzden
+// canli boru yerine tamamlanmis dosya Range destegiyle servis edilir.
+async function dubAudioHandler(req, res) {
+    var key = readKey(req);
+    if (!keyAllowed(key)) return denyKey(res);
+    try {
+        var type = req.params.type;
+        var id = String(req.params.id || "").replace(/\.m4a$/, "");
+        var targetFps = Number(req.query.fps) || 0;
+
+        var target = await imdbMapper.resolveStreamTarget(type, id);
+        if (!target) return res.status(404).json({ err: "icerik bulunamadi" });
+
+        var source = await dubsync.resolveTrAudioSource(target.path);
+        var sourceFps = await sourceFpsOf(source, target.path);
+        var atempo = targetFps ? dubsync.snapFps(targetFps) / sourceFps : 1;
+
+        var job = await dubsync.prepareCorrectedAudio(source, target.path, atempo, { cacheDir: DUB_CACHE_DIR });
+        if (job.status !== "ready") {
+            if (!job.job) return res.status(503).json({ err: "hazirlaniyor" });
+            await job.job; // ayni dosya icin ikinci istek de ayni isi bekler
+        }
+
+        var file = job.file;
+        var stat = fs.statSync(file);
+        var range = req.headers.range;
+        res.setHeader("Content-Type", "audio/mp4");
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+
+        if (range) {
+            var m = /bytes=(\d*)-(\d*)/.exec(range) || [];
+            var start = m[1] ? parseInt(m[1], 10) : 0;
+            var end = m[2] ? parseInt(m[2], 10) : stat.size - 1;
+            if (start >= stat.size) {
+                res.setHeader("Content-Range", "bytes */" + stat.size);
+                return res.status(416).end();
+            }
+            end = Math.min(end, stat.size - 1);
+            res.status(206);
+            res.setHeader("Content-Range", "bytes " + start + "-" + end + "/" + stat.size);
+            res.setHeader("Content-Length", end - start + 1);
+            return fs.createReadStream(file, { start: start, end: end }).pipe(res);
+        }
+
+        res.setHeader("Content-Length", stat.size);
+        return fs.createReadStream(file).pipe(res);
+    } catch (error) {
+        console.log("[dub] ses hatasi:", error.message);
+        if (!res.headersSent) return res.status(500).json({ err: error.message });
+        return res.end();
+    }
+}
+
+app.get("/dub/:type/:id.json", dubInfoHandler);
+app.get("/:key/dub/:type/:id.json", keyedRoute(dubInfoHandler));
+app.get("/dub/:type/:id.m4a", dubAudioHandler);
+app.get("/:key/dub/:type/:id.m4a", keyedRoute(dubAudioHandler));
 
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, "frontend", "netflix-clone", "build"), { index: false }));
@@ -798,7 +939,6 @@ app.get("/api/trailer", async (req, res) => {
 });
 
 const { spawn } = require('child_process');
-const os = require('os');
 
 // Track active downloads
 const activeDownloads = new Map();

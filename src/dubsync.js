@@ -14,6 +14,8 @@
 
 const { spawn } = require("child_process");
 const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const listVideo = require("./videos");
 const hlsParser = require("./hls");
 const Axios = require("axios");
@@ -287,6 +289,7 @@ function measureSync(refPcm, dubPcm, log) {
 // Dizipal icerik yolundan Turkce ses kaynagini cozer.
 // Ayri TR ses rendition'i varsa onu, yoksa en dusuk bantli varyanti dondurur
 // (muxlanmis tek sesli kaynaklarda ses zaten dublajdir).
+// Donen nesne, kaynak fps'i olcmek icin video varyantinin adresini de tasir.
 async function resolveTrAudioSource(contentPath) {
     var video = await listVideo.GetVideos(contentPath);
     if (!video || !video.url) throw new Error("video cozulemedi: " + contentPath);
@@ -307,12 +310,47 @@ async function resolveTrAudioSource(contentPath) {
     var tr = (master.audios || []).find(function (a2) {
         return /^tur?$/i.test(a2.lang || "") || /t[uü]rk/i.test(a2.name || "");
     });
-    if (tr) return Object.assign({ url: tr.url, kind: "tr-rendition" }, source);
+    // Kaynak fps'i icin video varyanti gerekiyor; ses rendition'inda kare yok.
+    var videoVariant = master.variants.length ? master.variants[master.variants.length - 1].url : null;
+    if (tr) return Object.assign({ url: tr.url, kind: "tr-rendition", name: tr.name || "Türkçe", videoVariant: videoVariant }, source);
     if (master.variants.length) {
         var lowest = master.variants[master.variants.length - 1];
-        return Object.assign({ url: lowest.url, kind: "muxed-variant" }, source);
+        return Object.assign({ url: lowest.url, kind: "muxed-variant", name: "Türkçe", videoVariant: lowest.url }, source);
     }
-    return Object.assign({ url: video.url, kind: "direct" }, source);
+    return Object.assign({ url: video.url, kind: "direct", name: "Türkçe", videoVariant: video.url }, source);
+}
+
+// Kaynagin kare hizi. PAL hizlandirmasi burada yakalanir: dizipal WEB kaynaklari
+// 25 fps, REMUX'lar 23.976 fps olunca hiz orani = kaynak/hedef seklinde OLCUMSUZ
+// hesaplanabiliyor (olcumle dogrulandi: sapma ~1 ppm). Bir segment indirmek
+// gerektigi icin sonuc cagiran tarafta onbellege alinmali.
+async function probeSourceFps(videoUrl, source) {
+    var args = ["-v", "error"]
+        .concat(source ? httpHeaderArgs(source) : [])
+        .concat([
+            "-select_streams", "v:0",
+            "-show_entries", "stream=avg_frame_rate,r_frame_rate",
+            "-of", "csv=p=0", videoUrl,
+        ]);
+    var out = String(await run("ffprobe", args)).trim().split("\n")[0] || "";
+    var fps = 0;
+    out.split(",").forEach(function (frac) {
+        var parts = String(frac).split("/");
+        var v = parts.length === 2 ? Number(parts[0]) / Number(parts[1]) : Number(parts[0]);
+        if (!fps && isFinite(v) && v > 1) fps = v;
+    });
+    if (!fps) throw new Error("kaynak fps okunamadi");
+    return fps;
+}
+
+// Yaygin kare hizlarina yapisma: ffprobe 25000/1000 yerine 24999/1000 gibi
+// degerler dondurebiliyor, bu da hiz oraninda gereksiz ppm hatasi yaratir.
+function snapFps(fps) {
+    var common = [23.976023976, 24, 25, 29.97002997, 30, 50, 59.94005994, 60];
+    for (var i = 0; i < common.length; i++) {
+        if (Math.abs(fps - common[i]) / common[i] < 0.002) return common[i];
+    }
+    return fps;
 }
 
 // TR sesi kayipsiz kopyayla yerel dosyaya indirir (mux'ta yeniden kullanilir).
@@ -324,6 +362,85 @@ async function downloadAudio(source, outFile) {
     args = args.concat(["-map", "0:a:0", "-c", "copy", outFile]);
     await run("ffmpeg", args);
     return outFile;
+}
+
+// ------------------------------------- hedefe uyarlanmis ses uretimi ----
+
+// Hiz duzeltilmis sesi diske hazirlar; ayni is iki kez istenirse tek is calisir.
+// mpv harici ses izinde ARAMA (seek) yapabilmeli, bu yuzden canli boru yerine
+// tamamlanmis bir dosya servis ediyoruz — yarim indirilmis dosya "hazir"
+// sanilmasin diye once .part'a yazilip bitince yeniden adlandiriliyor.
+const jobs = new Map();
+
+function correctedName(contentPath, atempo, pitch) {
+    var slug = String(contentPath).replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "");
+    return slug + "__" + (pitch === "keep" ? "t" : "r") + atempo.toFixed(6).replace(".", "") + ".m4a";
+}
+
+// asetrate icin ara ornekleme hizi. asetrate tamsayi bir hiz ister; yuksek bir
+// tabandan gidince yuvarlama hatasi ~1 ppm'e (bolum boyunca ~2 ms) iner.
+const RESAMPLE_BASE = 192000;
+
+// atempo: sesi hedefin zaman eksenine oturtan carpan (1/hiz orani).
+//
+// PAL hizlandirmasi bir YENIDEN ORNEKLEME'dir: ses hem hizlanir hem tizlesir.
+// Dolayisiyla dogru tersi de yeniden ornekleme (asetrate) — zamanlamayla
+// birlikte perdeyi de orijinaline dondurur. Bunun olculebilir kaniti var:
+// dizipal sesi 0.959 ile yeniden orneklenince REMUX'un muzik yatagiyla HAM
+// ORNEK duzeyinde (yalnizca zarfta degil) 0.04 ms artikla ortusuyor; bu ancak
+// spektrum da ortusurse olur. atempo yalnizca zamanlamayi duzeltir, perdeyi
+// %4.3 tiz birakir — perde korunsun istenirse pitch: "keep".
+async function prepareCorrectedAudio(source, contentPath, atempo, opts) {
+    opts = opts || {};
+    var dir = opts.cacheDir || path.join(os.tmpdir(), "komanmovie-dub");
+    fs.mkdirSync(dir, { recursive: true });
+    var outFile = path.join(dir, correctedName(contentPath, atempo, opts.pitch));
+
+    if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
+        return { status: "ready", file: outFile };
+    }
+    if (jobs.has(outFile)) return { status: "preparing", file: outFile };
+
+    var partFile = outFile + ".part";
+    // Kaynagin kendi ornekleme hizi bilinmedigi icin once sabit bir tabana
+    // getiriliyor: asetrate mutlak bir hiz alir, goreli bir carpan degil.
+    var filters = opts.pitch === "keep"
+        ? ["atempo=" + atempo.toFixed(7)]
+        : [
+            "aresample=" + RESAMPLE_BASE,
+            "asetrate=" + Math.round(RESAMPLE_BASE * atempo),
+            "aresample=48000",
+        ];
+
+    var args = ["-v", "error", "-y"]
+        .concat(httpHeaderArgs(source))
+        .concat(["-i", source.url]);
+    if (source.kind === "muxed-variant") args = args.concat(["-vn"]);
+    args = args.concat([
+        "-map", "0:a:0",
+        "-af", filters.join(","),
+        "-c:a", "aac", "-b:a", opts.bitrate || "192k",
+        "-movflags", "+faststart",
+        "-metadata:s:a:0", "language=tur",
+        // Uzanti .part oldugu icin ffmpeg konteyneri ad'dan secemiyor.
+        "-f", "mp4", partFile,
+    ]);
+
+    var job = run("ffmpeg", args).then(function () {
+        fs.renameSync(partFile, outFile);
+        jobs.delete(outFile);
+        return outFile;
+    }, function (e) {
+        jobs.delete(outFile);
+        try { fs.unlinkSync(partFile); } catch (e2) {}
+        throw e;
+    });
+    jobs.set(outFile, job);
+    // Isi baslatan istek genelde onu beklemez (once "preparing" doner); sahipsiz
+    // bir red tum sunucuyu dusurur, bu yuzden burada ayrica yutuluyor. Bekleyen
+    // cagiranlar yine `job` uzerinden hatayi gorur.
+    job.catch(function () {});
+    return { status: "preparing", file: outFile, job: job };
 }
 
 // ------------------------------------------------------------- mux ----
@@ -352,4 +469,7 @@ async function muxDub(refFile, dubAudioFile, outFile, sync, opts) {
     return outFile;
 }
 
-module.exports = { resolveTrAudioSource, downloadAudio, decodePcm, probeDuration, measureSync, muxDub, SR };
+module.exports = {
+    resolveTrAudioSource, downloadAudio, decodePcm, probeDuration, measureSync, muxDub,
+    probeSourceFps, snapFps, prepareCorrectedAudio, SR,
+};

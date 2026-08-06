@@ -14,6 +14,7 @@
 //   --season <n>          sadece bu sezonu isle
 //   --episode <n>         sadece bu bolumu isle
 //   --mux                 senkronlu TR sesli .mkv uret (varsayilan: sadece olc)
+//   --save                olculen gecikmeyi depoya yaz (/dub ucu bunu kullanir)
 //   --outdir <klasor>     mux ciktilari ve indirilen sesler icin klasor
 //   --audio-dir <klasor>  indirilen TR seslerini burada sakla/yeniden kullan
 
@@ -22,6 +23,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const dubsync = require("../src/dubsync");
+const dubstore = require("../src/dubstore");
 const searchVideo = require("../src/search");
 
 const VIDEO_EXT = /\.(mkv|mp4|avi|m2ts|ts|mov)$/i;
@@ -98,6 +100,23 @@ async function processOne(file, contentPath, opts) {
     var sync = dubsync.measureSync(refPcm, dubPcm, function (m) { console.log("  " + m); });
     console.log("  olcum " + ((Date.now() - t0) / 1000).toFixed(0) + " sn surdu");
 
+    // Olculen gecikme, /dub ucunun istemciye verecegi tek olculemez parca.
+    // Referans sure de yazilir: istemci baska bir surum oynatiyorsa (farkli
+    // kirpma) sunucu bu degeri uygulamaz.
+    if (opts.save) {
+        var refDuration = await dubsync.probeDuration(file);
+        dubstore.put(contentPath, {
+            delayMs: sync.delayMs,
+            speed: sync.speed,
+            atempo: sync.atempo,
+            refDuration: refDuration,
+            refFile: path.basename(file),
+            residualMs: sync.residualMs,
+            measuredAt: new Date().toISOString(),
+        });
+        console.log("  kaydedildi -> " + dubstore.STORE_FILE);
+    }
+
     console.log("  hiz orani : " + sync.speed.toFixed(7) + (Math.abs(sync.speed - 25 / 23.976) < 0.0005 ? "  (PAL 25/23.976)" : ""));
     console.log("  atempo    : " + sync.atempo.toFixed(7));
     console.log("  delay     : " + fmtMs(sync.delayMs) + " (atempo sonrasi)");
@@ -151,6 +170,7 @@ async function processOne(file, contentPath, opts) {
         try {
             results.push(await processOne(jobs[i].file, jobs[i].contentPath, {
                 mux: !!args.mux,
+                save: !!args.save,
                 outdir: args.outdir && String(args.outdir),
                 audioDir: args["audio-dir"] && String(args["audio-dir"]),
             }));

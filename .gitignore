@@ -3,3 +3,4 @@ node_modules/
 static/subs/
 .domain-cache.json
 .imdb-cache.json
+.dubsync-store.json
