@@ -170,10 +170,21 @@ async function processOne(file, contentPath, opts) {
     if (opts.mux) {
         var outDir = opts.outdir || path.dirname(file);
         fs.mkdirSync(outDir, { recursive: true });
-        var outFile = path.join(outDir, tag + ".TR-Dublaj.mkv");
-        console.log("  mux: " + outFile);
-        await dubsync.muxDub(file, audioFile, outFile, sync);
-        console.log("  mux tamam (" + Math.round(fs.statSync(outFile).size / 1e9 * 10) / 10 + " GB)");
+        var outFile = path.join(outDir, tag + ".TR.mkv");
+
+        // Depodaki plan olcumun kendisinden onceliklidir: parcali hizalama
+        // oradadir ve sabit gecikme onu temsil edemez.
+        var stored = dubstore.get(contentPath);
+        var plan = (stored && (stored.segments || stored.delayMs != null))
+            ? { atempo: stored.atempo, delayMs: stored.delayMs, segments: stored.segments }
+            : { atempo: sync.atempo, delayMs: sync.delayMs, segments: segments };
+
+        console.log("  mux: " + outFile
+            + (plan.segments && plan.segments.length > 1
+                ? "  (parcali: " + (plan.segments.length - 1) + " kesik telafisi)"
+                : "  (sabit gecikme " + Math.round(plan.delayMs) + " ms)"));
+        await dubsync.muxDub(file, audioFile, outFile, plan);
+        console.log("  mux tamam (" + (fs.statSync(outFile).size / 1e9).toFixed(2) + " GB)");
     }
     return { file: tag, sync: sync };
 }

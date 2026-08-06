@@ -536,10 +536,10 @@ function correctedName(contentPath, atempo, pitch, segments) {
 //
 // Cikti = sessizlik(offset0) + parca0 + sessizlik(offset1-offset0) + parca1 + ...
 // Kesilen icerik geri gelmiyor; yalnizca kalan kisim dogru yere hizalaniyor.
-function segmentFilter(segments, preFilters) {
+function segmentFilter(segments, preFilters, inputLabel) {
     var parts = [];
     var pre = preFilters.length ? preFilters.join(",") + "," : "";
-    parts.push("[0:a]" + pre + "asplit=" + segments.length
+    parts.push((inputLabel || "[0:a]") + pre + "asplit=" + segments.length
         + " " + segments.map(function (_, i) { return "[p" + i + "]"; }).join(""));
 
     var labels = [];
@@ -659,25 +659,54 @@ function pruneCache(dir, maxAgeMs) {
 // ------------------------------------------------------------- mux ----
 
 // Referans videonun tum izlerini koruyup senkronlanmis TR sesini ekler.
-async function muxDub(refFile, dubAudioFile, outFile, sync, opts) {
+// Dosyadaki ses izi sayisi: yeni Turkce izin indeksi ve hangi izlerin
+// "varsayilan" isaretinin kaldirilacagi buna bagli.
+async function audioTrackCount(file) {
+    var out = await run("ffprobe", ["-v", "error", "-select_streams", "a",
+        "-show_entries", "stream=index", "-of", "csv=p=0", file]);
+    return String(out).trim().split("\n").filter(Boolean).length;
+}
+
+// Yerel videoya senkronlanmis Turkce ses izi ekler.
+//
+// plan: { atempo, segments } — segments birden fazlaysa kesikler sessizlikle
+// telafi edilir (kurgusu farkli surumler), tek segmentse sabit gecikme uygulanir.
+// Orijinal izlerin hicbiri yeniden kodlanmaz; yalnizca eklenen ses AAC olur.
+async function muxDub(refFile, dubAudioFile, outFile, plan, opts) {
     opts = opts || {};
-    var filters = ["atempo=" + sync.atempo.toFixed(7)];
-    if (sync.offsetSec >= 0) {
-        filters.push("adelay=" + Math.round(sync.delayMs) + ":all=1");
-    } else {
-        filters.push("atrim=start=" + (-sync.offsetSec).toFixed(4), "asetpts=PTS-STARTPTS");
-    }
+    var atempo = plan.atempo || 1;
+    var speedFilters = Math.abs(atempo - 1) <= 0.0005 ? [] : [
+        "aresample=" + RESAMPLE_BASE,
+        "asetrate=" + Math.round(RESAMPLE_BASE * atempo),
+        "aresample=48000",
+    ];
+
+    // Sabit gecikme de tek segmentlik bir plan olarak ifade edilebiliyor, bu
+    // sayede iki durum ayni kod yolundan geciyor.
+    var segments = (plan.segments && plan.segments.length)
+        ? plan.segments
+        : [{ start: 0, offset: (plan.delayMs || 0) / 1000 }];
+
+    var nAudio = await audioTrackCount(refFile);
+    var trIndex = nAudio; // eklenen iz sona geliyor
+
     var args = [
         "-v", "error", "-y",
         "-i", refFile, "-i", dubAudioFile,
-        "-filter_complex", "[1:a:0]" + filters.join(",") + "[tr]",
-        "-map", "0", "-map", "[tr]",
-        "-c", "copy", "-c:a:1", "aac", "-b:a:1", opts.bitrate || "192k",
-        "-metadata:s:a:1", "language=tur",
-        "-metadata:s:a:1", "title=" + (opts.title || "Türkçe (KomanMovie)"),
-        outFile,
+        "-filter_complex", segmentFilter(segments, speedFilters, "[1:a:0]"),
+        "-map", "0", "-map", "[out]",
+        "-c", "copy", "-c:a:" + trIndex, "aac", "-b:a:" + trIndex, opts.bitrate || "192k",
+        "-metadata:s:a:" + trIndex, "language=tur",
+        "-metadata:s:a:" + trIndex, "title=" + (opts.title || "Türkçe (KomanMovie)"),
     ];
-    // -c copy tum izlere uygulanir; yeni ses izi icin -c:a:1 aac onu ezer.
+    // Turkce surum isteniyor: diger izlerin varsayilan isareti kaldiriliyor ki
+    // oynatici kendiliginden Turkce'yi secsin.
+    if (opts.defaultTurkish !== false) {
+        for (var i = 0; i < nAudio; i++) args.push("-disposition:a:" + i, "0");
+        args.push("-disposition:a:" + trIndex, "default");
+    }
+    args.push(outFile);
+
     await run("ffmpeg", args);
     return outFile;
 }
