@@ -444,6 +444,16 @@ async function resolveTrAudioSource(contentPath) {
     // Kaynak fps'i icin video varyanti gerekiyor; ses rendition'inda kare yok.
     var videoVariant = master.variants.length ? master.variants[master.variants.length - 1].url : null;
     if (tr) return Object.assign({ url: tr.url, kind: "tr-rendition", name: tr.name || "Türkçe", videoVariant: videoVariant }, source);
+
+    // Master ayri ses izleri ilan ediyorsa video varyantlari SESSIZDIR; boyle
+    // bir varyanti "ses" diye almak, ffmpeg'in anlasilmaz bir map hatasiyla
+    // dusmesine yol acar. Turkce yoksa durum nettir: kaynakta dublaj yok.
+    if ((master.audios || []).length) {
+        var have = master.audios.map(function (a2) { return a2.lang || a2.name; }).join(", ");
+        throw new Error("kaynakta Turkce ses izi yok (mevcut: " + have + ")");
+    }
+
+    // Ayri ses izi ilan edilmemisse ses varyantin icindedir.
     if (master.variants.length) {
         var lowest = master.variants[master.variants.length - 1];
         return Object.assign({ url: lowest.url, kind: "muxed-variant", name: "Türkçe", videoVariant: lowest.url }, source);
