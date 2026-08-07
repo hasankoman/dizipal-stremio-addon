@@ -195,10 +195,16 @@ async function processOne(file, contentPath, opts) {
 
         // Depodaki plan olcumun kendisinden onceliklidir: parcali hizalama
         // oradadir ve sabit gecikme onu temsil edemez.
+        // Parcali plan varsa hiz, olcumden DEGIL kare hizi oranindan gelir:
+        // sync.atempo o durumda reddedilmis fit'e aittir ve merdiveni "hiz
+        // farki" sanir. Uygulanirsa ses bolum boyunca sessizce surukleniyor.
+        // Kaydetme yolu bunu zaten boyle yapiyor; burasi da ayni olmali.
         var stored = dubstore.get(contentPath);
         var plan = (stored && (stored.segments || stored.delayMs != null))
             ? { atempo: stored.atempo, delayMs: stored.delayMs, segments: stored.segments }
-            : { atempo: sync.atempo, delayMs: sync.delayMs, segments: segments };
+            : segments
+                ? { atempo: 1 / segPlan.speed, delayMs: 0, segments: segments }
+                : { atempo: sync.atempo, delayMs: sync.delayMs, segments: null };
 
         console.log("  mux: " + outFile
             + (plan.segments && plan.segments.length > 1
