@@ -78,7 +78,12 @@ function seriesEstimate(contentPath) {
     var values = [];
     Object.keys(all).forEach(function (key) {
         if (key === contentPath || seriesSlug(key) !== slug) return;
-        if (usable(all[key])) values.push(all[key].delayMs);
+        // Parcali plani olan kayitlar disarida: onlarda delayMs 0'dir cunku
+        // hizalama sesin icine islenmistir, aktarilabilir bir sabit degildir.
+        // Alinirsa olculmemis bolume "duzeltildi" deyip hicbir sey uygulanmaz.
+        if (usable(all[key]) && !(all[key].segments && all[key].segments.length > 1)) {
+            values.push(all[key].delayMs);
+        }
     });
     if (values.length < 2) return null;
     values.sort(function (a, b) { return a - b; });
