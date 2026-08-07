@@ -17,6 +17,9 @@
 //   --save                olculen gecikmeyi depoya yaz (/dub ucu bunu kullanir)
 //   --outdir <klasor>     mux ciktilari ve indirilen sesler icin klasor
 //   --audio-dir <klasor>  indirilen TR seslerini burada sakla/yeniden kullan
+//   --dub-audio <dosya>   dublaji dizipal yerine bu yerel dosyadan al (video da
+//                         olabilir, ilk ses izi kullanilir) — kaynakta Turkce
+//                         olmayan bolumler icin
 
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 const fs = require("fs");
@@ -88,11 +91,17 @@ async function processOne(file, contentPath, opts) {
     console.log("\n=== " + tag);
     console.log("dizipal: " + contentPath);
 
+    // Dizipal'da dublaji olmayan bolumler icin ses baska bir yerden elde
+    // edilmis olabilir; o zaman dosya dogrudan kaynak olarak kullanilir.
+    // Video de olabilir, ilk ses izi alinir.
     var audioDir = opts.audioDir || fs.mkdtempSync(path.join(os.tmpdir(), "dubsync-"));
     fs.mkdirSync(audioDir, { recursive: true });
-    var audioFile = path.join(audioDir, tag + ".tur.m4a");
+    var audioFile = opts.dubAudio || path.join(audioDir, tag + ".tur.m4a");
 
-    if (!fs.existsSync(audioFile) || !fs.statSync(audioFile).size) {
+    if (opts.dubAudio) {
+        if (!fs.existsSync(audioFile)) throw new Error("dublaj dosyasi yok: " + audioFile);
+        console.log("ses kaynagi: yerel dosya (" + path.basename(audioFile) + ")");
+    } else if (!fs.existsSync(audioFile) || !fs.statSync(audioFile).size) {
         var source = await dubsync.resolveTrAudioSource(contentPath);
         console.log("ses kaynagi: " + source.kind);
         await dubsync.downloadAudio(source, audioFile);
@@ -122,8 +131,20 @@ async function processOne(file, contentPath, opts) {
         // "hiz farki" diye yorumluyor. Kare hizi orani ise olcumden bagimsiz
         // ve kesin — sunucu da ayni sekilde hesapliyor.
         var targetFps = dubsync.snapFps(await dubsync.probeSourceFps(file));
-        var src = await dubsync.resolveTrAudioSource(contentPath);
-        var sourceFps = dubsync.snapFps(await dubsync.probeSourceFps(src.videoVariant || src.url, src));
+        var sourceFps;
+        if (opts.dubAudio) {
+            // Yerel dublaj dosyasi video tasiyorsa kare hizi ondan okunur;
+            // yalnizca sesse kare yoktur, ayni hizda kabul edilir.
+            try {
+                sourceFps = dubsync.snapFps(await dubsync.probeSourceFps(audioFile));
+            } catch (e) {
+                sourceFps = targetFps;
+                console.log("  (dublaj dosyasinda goruntu yok, ayni kare hizi varsayildi)");
+            }
+        } else {
+            var src = await dubsync.resolveTrAudioSource(contentPath);
+            sourceFps = dubsync.snapFps(await dubsync.probeSourceFps(src.videoVariant || src.url, src));
+        }
         var trueSpeed = sourceFps / targetFps;
         segPlan = { speed: trueSpeed, sourceFps: sourceFps, targetFps: targetFps };
         console.log("  kare hizi: kaynak " + sourceFps + " / hedef " + targetFps
@@ -229,6 +250,7 @@ async function processOne(file, contentPath, opts) {
                 force: !!args.force,
                 outdir: args.outdir && String(args.outdir),
                 audioDir: args["audio-dir"] && String(args["audio-dir"]),
+                dubAudio: args["dub-audio"] && String(args["dub-audio"]),
             }));
         } catch (e2) {
             console.log("HATA (" + path.basename(jobs[i].file) + "): " + e2.message);
