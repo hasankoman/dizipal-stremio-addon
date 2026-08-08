@@ -200,6 +200,17 @@ async function processOne(file, contentPath, opts) {
         // farki" sanir. Uygulanirsa ses bolum boyunca sessizce surukleniyor.
         // Kaydetme yolu bunu zaten boyle yapiyor; burasi da ayni olmali.
         var stored = dubstore.get(contentPath);
+        var usable = (stored && (stored.segments || stored.delayMs != null)) || sync.reliable || segments;
+        if (!usable && !opts.force) {
+            // Hicbir guvenilir hizalama yok. Reddedilmis fit'in degerleriyle mux
+            // etmek, saatlerce yazilip sonra kayik oldugu anlasilan bir dosya
+            // uretir; hic uretmemek daha iyi.
+            console.log("  MUX YAPILMADI: olcum guvenilmez (artik "
+                + sync.residualMs.toFixed(1) + " ms) ve parcali plan cikarilamadi."
+                + " Zorlamak icin --force.");
+            return { file: tag, sync: sync, skipped: true };
+        }
+
         var plan = (stored && (stored.segments || stored.delayMs != null))
             ? { atempo: stored.atempo, delayMs: stored.delayMs, segments: stored.segments }
             : segments
