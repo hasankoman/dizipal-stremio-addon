@@ -159,6 +159,34 @@ function cookieHeaderOf(response) {
     return setCookies.map(function (c) { return c.split(";")[0]; }).join("; ");
 }
 
+// Newer embed hosts (cortinaeaccoladed.xyz and friends) no longer put a plain URL
+// in the JWPlayer setup — the source is wrapped in av("..."): reverse the string,
+// base64-decode it, subtract a per-position shift derived from HLS_KEY, then
+// base64-decode again. HLS_KEY is emitted per page, so read it from the same HTML
+// rather than hardcoding the current value.
+function decodeObfuscatedFile(html) {
+    var call = html.match(/file\s*:\s*(?:av|_)\s*\(\s*["']([^"']+)["']\s*\)/);
+    if (!call) return null;
+    var keyMatch = html.match(/HLS_KEY\s*=\s*["']([^"']+)["']/);
+    if (!keyMatch || !keyMatch[1]) return null;
+    var hlsKey = keyMatch[1];
+    try {
+        var reversed = call[1].split("").reverse().join("");
+        var shifted = Buffer.from(reversed, "base64").toString("binary");
+        var plain = "";
+        for (var i = 0; i < shifted.length; i++) {
+            var k = hlsKey[i % hlsKey.length];
+            plain += String.fromCharCode(shifted.charCodeAt(i) - (k.charCodeAt(0) % 5 + 1));
+        }
+        var url = Buffer.from(plain, "base64").toString("utf8");
+        // A wrong key still decodes to *something*, so only trust a real URL.
+        return /^https?:\/\/\S+$/i.test(url) ? url : null;
+    } catch (e) {
+        console.log("[scrape] av() cozulemedi:", e.message);
+        return null;
+    }
+}
+
 async function ScrapeVideoUrl(scrapeUrl, customReferer) {
     try {
         var embedOrigin = scrapeUrl;
@@ -297,6 +325,10 @@ async function ScrapeVideoUrl(scrapeUrl, customReferer) {
                     }
                 }
             }
+
+            // Method 4: obfuscated JWPlayer source. Runs on the whole page, not just
+            // the setup() block, so it still fires when that block fails to match.
+            if (!playerFileLink) playerFileLink = decodeObfuscatedFile(html);
 
             if (playerFileLink) {
                 return {
