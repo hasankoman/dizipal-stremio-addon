@@ -162,29 +162,77 @@ function cookieHeaderOf(response) {
 // Newer embed hosts (cortinaeaccoladed.xyz and friends) no longer put a plain URL
 // in the JWPlayer setup — the source is wrapped in av("..."): reverse the string,
 // base64-decode it, subtract a per-position shift derived from HLS_KEY, then
-// base64-decode again. HLS_KEY is emitted per page, so read it from the same HTML
-// rather than hardcoding the current value.
+// base64-decode again.
+const MEDIA_URL_RE = /\.(m3u8|mp4|mkv)(\?|$)/i;
+
+// Each key character contributes a shift of (code % 5) + 1, so a key of length n
+// is really just n numbers in 1..5. Reading the key out of the page is the fast
+// path, but the host keeps moving where it hides it (a plain HLS_KEY on one
+// episode, a base64 config blob on the next), so the shifts are derived directly
+// when no known shape matches. A wrong guess cannot survive: the result has to
+// base64-decode into a media URL.
+function shiftsFromKey(key) {
+    return Array.prototype.map.call(key, function (c) { return (c.charCodeAt(0) % 5) + 1; });
+}
+
+function keyShiftCandidates(html) {
+    var out = [];
+    var plain = html.match(/HLS_KEY\s*=\s*["']([^"']+)["']/);
+    if (plain && plain[1]) out.push(shiftsFromKey(plain[1]));
+    // The config moved into a base64 blob: { k: "MDFD" } decodes to "01C".
+    var packed = html.match(/\bk\s*:\s*["']([A-Za-z0-9+/=]{2,})["']/);
+    if (packed && packed[1]) {
+        try {
+            var decoded = Buffer.from(packed[1], "base64").toString("utf8");
+            if (decoded) out.push(shiftsFromKey(decoded));
+        } catch (e) { /* not a key, fall through to derivation */ }
+    }
+    return out;
+}
+
+function applyShifts(shifted, shifts) {
+    var plain = "";
+    for (var i = 0; i < shifted.length; i++) {
+        plain += String.fromCharCode(shifted.charCodeAt(i) - shifts[i % shifts.length]);
+    }
+    try {
+        var url = Buffer.from(plain, "base64").toString("utf8");
+        return /^https?:\/\/\S+$/i.test(url) && MEDIA_URL_RE.test(url) ? url : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+const MAX_DERIVED_KEY_LEN = 4;
+
+function deriveShifts(shifted) {
+    for (var len = 1; len <= MAX_DERIVED_KEY_LEN; len++) {
+        for (var n = 0, total = Math.pow(5, len); n < total; n++) {
+            var shifts = [];
+            for (var i = 0, x = n; i < len; i++, x = Math.floor(x / 5)) shifts.push((x % 5) + 1);
+            var url = applyShifts(shifted, shifts);
+            if (url) return url;
+        }
+    }
+    return null;
+}
+
 function decodeObfuscatedFile(html) {
     var call = html.match(/file\s*:\s*(?:av|_)\s*\(\s*["']([^"']+)["']\s*\)/);
     if (!call) return null;
-    var keyMatch = html.match(/HLS_KEY\s*=\s*["']([^"']+)["']/);
-    if (!keyMatch || !keyMatch[1]) return null;
-    var hlsKey = keyMatch[1];
+    var shifted;
     try {
-        var reversed = call[1].split("").reverse().join("");
-        var shifted = Buffer.from(reversed, "base64").toString("binary");
-        var plain = "";
-        for (var i = 0; i < shifted.length; i++) {
-            var k = hlsKey[i % hlsKey.length];
-            plain += String.fromCharCode(shifted.charCodeAt(i) - (k.charCodeAt(0) % 5 + 1));
-        }
-        var url = Buffer.from(plain, "base64").toString("utf8");
-        // A wrong key still decodes to *something*, so only trust a real URL.
-        return /^https?:\/\/\S+$/i.test(url) ? url : null;
+        shifted = Buffer.from(call[1].split("").reverse().join(""), "base64").toString("binary");
     } catch (e) {
-        console.log("[scrape] av() cozulemedi:", e.message);
         return null;
     }
+
+    var candidates = keyShiftCandidates(html);
+    for (var i = 0; i < candidates.length; i++) {
+        var url = applyShifts(shifted, candidates[i]);
+        if (url) return url;
+    }
+    return deriveShifts(shifted);
 }
 
 async function ScrapeVideoUrl(scrapeUrl, customReferer) {
