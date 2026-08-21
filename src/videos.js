@@ -53,6 +53,76 @@ function decryptIframeUrl(jsonStr) {
     }
 }
 
+// The site renames its player-config endpoint from time to time
+// (/ajax-player-config became /ajax in Aug 2026, which broke every title at
+// once). The live name is in the page's own main.js as
+// open("POST", BASE_URL + "<path>") followed by send("cfg=..."), so read it
+// from there instead of hardcoding a name that goes stale; the names we have
+// seen stay as a fallback for when the script cannot be read.
+const PLAYER_CONFIG_FALLBACKS = ["ajax", "ajax-player-config"];
+var playerConfigCache = { scriptUrl: null, path: null };
+
+// Matches the POST that carries cfg=, not the site's other ajax calls
+// (ajax-search / ajax-view / ajax-ads), by refusing to cross another .open(.
+const PLAYER_CONFIG_RE = /open\(\s*["']POST["']\s*,\s*BASE_URL\s*\+\s*["']([a-z0-9._\/-]+)["'](?:(?!\.open\()[\s\S]){0,1200}?send\(\s*["']cfg=/i;
+
+async function discoverPlayerConfigPath($, pageBaseUrl) {
+    var scriptUrl = null;
+    $("script[src]").each(function (i, el) {
+        var src = $(el).attr("src") || "";
+        if (/assets\/js\/main\.js/i.test(src)) scriptUrl = makeAbsoluteUrl(src, pageBaseUrl);
+    });
+    if (!scriptUrl) return null;
+    // The ?v= stamp changes whenever the site ships new JS, so keying the cache
+    // on the full URL re-discovers exactly when the endpoint could have moved.
+    if (playerConfigCache.scriptUrl === scriptUrl) return playerConfigCache.path;
+
+    try {
+        var res = await Axios({
+            ...sslfix,
+            url: scriptUrl,
+            headers: header,
+            method: "GET",
+            validateStatus: function () { return true; },
+        });
+        if (res.status !== 200 || typeof res.data !== "string") return null;
+        var m = res.data.match(PLAYER_CONFIG_RE);
+        playerConfigCache = { scriptUrl: scriptUrl, path: m ? m[1] : null };
+        return playerConfigCache.path;
+    } catch (e) {
+        console.log("[player-config] main.js okunamadi:", e.message);
+        return null;
+    }
+}
+
+async function postPlayerConfig($, pageBaseUrl, pageUrl, cookies, cfg) {
+    var discovered = await discoverPlayerConfigPath($, pageBaseUrl);
+    var paths = [discovered].concat(PLAYER_CONFIG_FALLBACKS).filter(function (p, i, a) {
+        return p && a.indexOf(p) === i;
+    });
+
+    for (var i = 0; i < paths.length; i++) {
+        var res = await Axios({
+            ...sslfix,
+            url: pageBaseUrl + "/" + paths[i].replace(/^\//, ""),
+            headers: {
+                ...header,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": pageUrl,
+                "Origin": pageBaseUrl,
+                "Cookie": cookies,
+            },
+            method: "POST",
+            data: "cfg=" + encodeURIComponent(cfg),
+            validateStatus: function () { return true; },
+        });
+        if (res && res.status === 200 && res.data && res.data.success) return res;
+        console.log("[player-config] " + (res && res.status) + " -> /" + paths[i]);
+    }
+    return null;
+}
+
 async function GetVideos(id, isRetry) {
     try {
         var requestedUrl = new URL(id, process.env.PROXY_URL).toString();
@@ -96,7 +166,7 @@ async function GetVideos(id, isRetry) {
                 }
             }
 
-            // Method 2: data-cfg + ajax-player-config
+            // Method 2: data-cfg + player-config endpoint
             var cookies = "";
             var setCookies = response.headers["set-cookie"];
             if (setCookies) {
@@ -104,20 +174,7 @@ async function GetVideos(id, isRetry) {
             }
             var cfg = $("#videoContainer").attr("data-cfg");
             if (cfg) {
-                var playerResponse = await Axios({
-                    ...sslfix,
-                    url: pageBaseUrl + "/ajax-player-config",
-                    headers: {
-                        ...header,
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Referer": pageUrl,
-                        "Origin": pageBaseUrl,
-                        "Cookie": cookies,
-                    },
-                    method: "POST",
-                    data: "cfg=" + encodeURIComponent(cfg)
-                });
+                var playerResponse = await postPlayerConfig($, pageBaseUrl, pageUrl, cookies, cfg);
                 if (playerResponse && playerResponse.status == 200 && playerResponse.data) {
                     var data = playerResponse.data;
                     if (data.success && data.config) {
