@@ -555,11 +555,19 @@ function segmentFilter(segments, preFilters, inputLabel) {
     var labels = [];
     segments.forEach(function (seg, i) {
         var next = segments[i + 1];
-        var trim = "atrim=start=" + seg.start.toFixed(4)
+        var gap = i === 0 ? seg.offset : seg.offset - segments[i - 1].offset;
+
+        // Hizalama iki yone de gidebilir:
+        //   gap > 0  -> ses GEC baslamali, onune sessizlik konur (asagida)
+        //   gap < 0  -> ses ERKEN baslamali, onunden |gap| kadar KIRPILIR
+        // Ikinci durum eskiden hic islenmiyordu: negatif gecikme sessizce
+        // yok sayilip ses kaymis halde mux ediliyordu. Kaynagin fazladan
+        // introsu (TV+ jenerigi gibi) tam da negatif gecikme uretir.
+        var trimStart = seg.start + (gap < 0 ? -gap : 0);
+        var trim = "atrim=start=" + trimStart.toFixed(4)
             + (next ? ":end=" + next.start.toFixed(4) : "");
         parts.push("[p" + i + "]" + trim + ",asetpts=PTS-STARTPTS[s" + i + "]");
 
-        var gap = i === 0 ? seg.offset : seg.offset - segments[i - 1].offset;
         if (gap > 0.0005) {
             parts.push("anullsrc=channel_layout=stereo:sample_rate=48000,"
                 + "atrim=duration=" + gap.toFixed(4) + ",asetpts=PTS-STARTPTS[g" + i + "]");

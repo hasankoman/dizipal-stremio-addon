@@ -19,7 +19,11 @@
 //   --audio-dir <klasor>  indirilen TR seslerini burada sakla/yeniden kullan
 //   --dub-audio <dosya>   dublaji dizipal yerine bu yerel dosyadan al (video da
 //                         olabilir, ilk ses izi kullanilir) — kaynakta Turkce
-//                         olmayan bolumler icin
+//                         olmayan bolumler icin. Verilirse bolumun dizipal'da
+//                         bulunmasi da gerekmez.
+//   --source-fps <n>      dublajin geldigi kaynagin kare hizi. Salt ses
+//                         dosyalarinda kare hizi okunamaz; verilmezse hedefle
+//                         ayni varsayilir ve hiz duzeltmesi sessizce atlanir.
 
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 const fs = require("fs");
@@ -132,14 +136,20 @@ async function processOne(file, contentPath, opts) {
         // ve kesin — sunucu da ayni sekilde hesapliyor.
         var targetFps = dubsync.snapFps(await dubsync.probeSourceFps(file));
         var sourceFps;
-        if (opts.dubAudio) {
+        if (opts.sourceFps) {
+            // Salt ses dosyasinda kare hizi yoktur ama kaynagin hizi bilinebilir
+            // (ornegin ayni surumun videosundan). Elle verilince tahmin yapilmaz.
+            sourceFps = dubsync.snapFps(Number(opts.sourceFps));
+            console.log("  (kaynak kare hizi elle verildi: " + sourceFps + ")");
+        } else if (opts.dubAudio) {
             // Yerel dublaj dosyasi video tasiyorsa kare hizi ondan okunur;
             // yalnizca sesse kare yoktur, ayni hizda kabul edilir.
             try {
                 sourceFps = dubsync.snapFps(await dubsync.probeSourceFps(audioFile));
             } catch (e) {
                 sourceFps = targetFps;
-                console.log("  (dublaj dosyasinda goruntu yok, ayni kare hizi varsayildi)");
+                console.log("  (dublaj dosyasinda goruntu yok, ayni kare hizi varsayildi)"
+                    + " — yanlissa --source-fps ile ver");
             }
         } else {
             var src = await dubsync.resolveTrAudioSource(contentPath);
@@ -251,8 +261,15 @@ async function processOne(file, contentPath, opts) {
         if (args.season && s !== parseInt(args.season, 10)) return;
         if (args.episode && e !== parseInt(args.episode, 10)) return;
         var id = eps[s + "x" + e];
-        if (!id) { console.log("dizipal'da yok, atlandi: " + path.basename(f) + " (S" + s + "E" + e + ")"); return; }
-        jobs.push({ file: f, contentPath: id, s: s, e: e });
+        // Yerel dublaj verildiyse bolumun dizipal'da bulunmasi gerekmez:
+        // contentPath yalnizca ses indirme ve depo anahtari icin lazim, ilki
+        // bu yolda hic calismiyor. Kaynakta olmayan sezonlar (S03 gibi) boyle
+        // islenebiliyor.
+        if (!id && !args["dub-audio"]) {
+            console.log("dizipal'da yok, atlandi: " + path.basename(f) + " (S" + s + "E" + e + ")");
+            return;
+        }
+        jobs.push({ file: f, contentPath: id || ("local:" + seriesPath + "/" + s + "x" + e), s: s, e: e });
     });
     jobs.sort(function (a, b) { return a.s - b.s || a.e - b.e; });
     if (!jobs.length) { console.log("islenecek dosya bulunamadi"); process.exit(1); }
@@ -268,6 +285,7 @@ async function processOne(file, contentPath, opts) {
                 outdir: args.outdir && String(args.outdir),
                 audioDir: args["audio-dir"] && String(args["audio-dir"]),
                 dubAudio: args["dub-audio"] && String(args["dub-audio"]),
+                sourceFps: args["source-fps"] && String(args["source-fps"]),
             }));
         } catch (e2) {
             console.log("HATA (" + path.basename(jobs[i].file) + "): " + e2.message);
